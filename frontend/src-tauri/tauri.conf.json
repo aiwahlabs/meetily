@@ -1,8 +1,8 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "meetily",
+    "productName": "Aiwah Minutes",
     "version": "0.5.0",
-    "identifier": "com.meetily.ai",
+    "identifier": "com.aiwahlabs.minutes",
     "build": {
         "frontendDist": "../out",
         "devUrl": "http://localhost:3118",
@@ -12,7 +12,7 @@
     "app": {
         "windows": [
             {
-                "title": "meetily",
+                "title": "Aiwah Minutes",
                 "width": 1100,
                 "height": 700,
                 "preventOverflow": true,
@@ -81,15 +81,12 @@
     },
     "bundle": {
         "active": true,
-        "shortDescription": "Privacy-first AI meeting note taker",
-        "longDescription": "Meetily Community Edition is a free, open-source AI meeting assistant. Record meetings, transcribe audio locally and create AI summaries using local models or a provider you choose. Your recordings and transcripts stay on your device.",
+        "shortDescription": "Aiwah Minutes: meeting recorder that syncs to HQ Workshop",
+        "longDescription": "Aiwah Minutes records meetings (microphone and system audio), transcribes them locally with Whisper or Parakeet, or with Sarvam via Aiwah HQ for Indic languages, and syncs every meeting to HQ Workshop. Based on Meetily Community Edition (MIT).",
         "category": "Productivity",
-        "publisher": "Meetily",
-        "homepage": "https://meetily.ai",
+        "publisher": "Aiwah Labs",
+        "homepage": "https://github.com/aiwahlabs/meetily",
         "targets": [
-            "deb",
-            "appimage",
-            "msi",
             "nsis",
             "app",
             "dmg"
@@ -114,7 +111,11 @@
         ],
         "linux": {
             "deb": {
-                "depends": ["libvulkan1", "libpulse0", "libasound2"]
+                "depends": [
+                    "libvulkan1",
+                    "libpulse0",
+                    "libasound2"
+                ]
             }
         },
         "macOS": {
@@ -130,7 +131,7 @@
         "updater": {
             "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDQTYzMUQ3ODc5N0M4MkEKUldRcXlKZUgxekdtN09DRkVWSHNpZlJseEVOUmpNd1dDSTNaLzZ3MXJGTnY3WW1pdnlOYjBpbkIK",
             "endpoints": [
-                "https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest/download/latest.json"
+                "https://github.com/aiwahlabs/meetily/releases/latest/download/latest.json"
             ]
         }
     }
