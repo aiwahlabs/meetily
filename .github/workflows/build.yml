@@ -632,6 +632,9 @@ jobs:
 
       - name: Build with Tauri
         id: tauri-build
+        # AIWAH: unsigned macOS builds use the step below (Tauri imports a certificate
+        # whenever APPLE_CERTIFICATE is defined, even when empty).
+        if: ${{ inputs.sign-binaries || runner.os != 'macOS' }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -642,6 +645,30 @@ jobs:
           APPLE_CERTIFICATE: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
+          # Tauri updater signing (ALWAYS enabled for .sig files)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # License validation RSA public key (embedded at build time)
+          MEETILY_RSA_PUBLIC_KEY: ${{ secrets.MEETILY_RSA_PUBLIC_KEY }}
+          MEETILY_DOODLE_URL: ${{ vars.MEETILY_DOODLE_URL }}
+          # Supabase configuration (for online license verification)
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        with:
+          projectPath: frontend
+          includeUpdaterJson: ${{ inputs.release-id == '' }}
+          tagName: ${{ inputs.release-id && runner.os != 'Linux' && format('v{0}', steps.get-version.outputs.version) || '' }}
+          releaseName: ${{ inputs.release-id && runner.os != 'Linux' && format('v{0}', steps.get-version.outputs.version) || '' }}
+          releaseId: ${{ runner.os != 'Linux' && inputs.release-id || '' }}
+          args: ${{ inputs.build-args }} ${{ steps.build-features.outputs.features }} ${{ steps.windows-portability.outputs.args }} ${{ steps.linux-portability.outputs.args }}
+
+      - name: Build with Tauri (unsigned macOS)
+        id: tauri-build-unsigned-macos
+        # AIWAH: same as above without APPLE_* variables so the bundler only ad-hoc signs.
+        if: ${{ !inputs.sign-binaries && runner.os == 'macOS' }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Tauri updater signing (ALWAYS enabled for .sig files)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

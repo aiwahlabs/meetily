@@ -24,7 +24,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 pub const DEFAULT_BASE_URL: &str = "https://hq-api.aiwahconnect.com";
 const SETTINGS_ID: &str = "default";
 const MAX_TRANSCRIPT_CHARS: usize = 500_000;
-const MAX_UPLOAD_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
+const MAX_UPLOAD_BYTES: u64 = 500 * 1024 * 1024; // HQ limit
 const MAX_ATTEMPTS: i64 = 8;
 const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
@@ -463,7 +463,7 @@ fn mime_for(path: &Path) -> &'static str {
         Some("flac") => "audio/flac",
         Some("ogg") => "audio/ogg",
         Some("webm") => "audio/webm",
-        _ => "application/octet-stream",
+        _ => "audio/mp4", // Meetily records AAC in an MP4 container
     }
 }
 
@@ -479,34 +479,29 @@ async fn push_upload(
         return Err("Recording file is empty".to_string());
     }
     if size > MAX_UPLOAD_BYTES {
-        return Err("Recording is larger than 1 GB; cannot upload".to_string());
+        return Err("Recording is larger than 500 MB; HQ cannot accept it".to_string());
     }
     let bytes = tokio::fs::read(recording).await.map_err(|e| format!("Recording not readable: {}", e))?;
-    let file_name = recording.file_name().and_then(|n| n.to_str()).unwrap_or("recording.mp4").to_string();
-    let part = reqwest::multipart::Part::bytes(bytes)
-        .file_name(file_name)
-        .mime_str(mime_for(recording))
-        .map_err(|e| format!("Upload error: {}", e))?;
 
+    // Contract (HQ): raw audio body with an audio/* Content-Type; metadata in the query.
     let (started_at, ended_at) = meeting.time_range();
-    let mut form = reqwest::multipart::Form::new()
-        .text("title", meeting.title())
-        .text("language", sarvam_language_code(language))
-        .text("startedAt", started_at)
-        .text("endedAt", ended_at)
-        .text("source", "aiwah-minutes-desktop");
-    if let Some(p) = project_id { form = form.text("projectId", p.to_string()); }
+    let mut query: Vec<(&str, String)> = vec![
+        ("title", meeting.title()),
+        ("language", sarvam_language_code(language)),
+        ("startedAt", started_at),
+        ("endedAt", ended_at),
+        ("source", "aiwah-minutes-desktop".to_string()),
+    ];
+    if let Some(p) = project_id { query.push(("projectId", p.to_string())); }
     let people = attendees(settings);
-    if !people.is_empty() { form = form.text("attendees", serde_json::json!(people).to_string()); }
-    // Local transcript as a fallback HQ can show while Sarvam runs.
-    let local = meeting.transcript_text();
-    if !local.trim().is_empty() { form = form.text("localTranscript", local); }
-    form = form.part("file", part);
+    if !people.is_empty() { query.push(("attendees", serde_json::json!(people).to_string())); }
 
     let resp = client(Duration::from_secs(30 * 60))?
         .post(settings.url("/v1/meetings/upload-recording"))
         .bearer_auth(settings.api_key.as_deref().unwrap_or_default().trim())
-        .multipart(form)
+        .query(&query)
+        .header(reqwest::header::CONTENT_TYPE, mime_for(recording))
+        .body(bytes)
         .send()
         .await
         .map_err(|e| format!("Could not upload recording to HQ: {}", e))?;
@@ -546,21 +541,26 @@ pub async fn process_meeting<R: Runtime>(app: &AppHandle<R>, pool: &SqlitePool, 
     let project_id = record.project_id.clone().or_else(|| settings.default_project_id.clone());
     let language = record.language.clone();
 
-    let mut outcome = Err("not attempted".to_string());
-    if is_indic_language(language.as_deref()) {
-        if let Some(recording) = find_recording(meeting.folder_path.as_deref()) {
-            outcome = push_upload(&settings, &meeting, &recording, language.as_deref().unwrap_or("ml"), project_id.as_deref()).await;
-            if matches!(outcome, Ok(PushOutcome::UploadUnsupported)) {
-                log::warn!("HQ does not accept recording uploads yet; falling back to transcript ingest");
-                outcome = push_ingest(&settings, &meeting, project_id.as_deref()).await;
+    let outcome = if is_indic_language(language.as_deref()) {
+        match find_recording(meeting.folder_path.as_deref()) {
+            Some(recording) => {
+                let lang = language.as_deref().unwrap_or("ml");
+                match push_upload(&settings, &meeting, &recording, lang, project_id.as_deref()).await {
+                    Ok(PushOutcome::UploadUnsupported) => {
+                        log::warn!("HQ does not accept recording uploads yet; falling back to transcript ingest");
+                        push_ingest(&settings, &meeting, project_id.as_deref()).await
+                    }
+                    other => other,
+                }
             }
-        } else {
-            log::warn!("Indic meeting has no recording file; syncing local transcript instead");
-            outcome = push_ingest(&settings, &meeting, project_id.as_deref()).await;
+            None => {
+                log::warn!("Indic meeting has no recording file; syncing local transcript instead");
+                push_ingest(&settings, &meeting, project_id.as_deref()).await
+            }
         }
     } else {
-        outcome = push_ingest(&settings, &meeting, project_id.as_deref()).await;
-    }
+        push_ingest(&settings, &meeting, project_id.as_deref()).await
+    };
 
     match outcome {
         Ok(PushOutcome::Synced { mode, hq_meeting_id }) => {
