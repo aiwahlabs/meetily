@@ -954,7 +954,7 @@ pub async fn api_save_meeting_title<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_save_transcript<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
@@ -995,6 +995,8 @@ pub async fn api_save_transcript<R: Runtime>(
                 "Successfully saved transcript and created meeting with id: {}",
                 meeting_id
             );
+            // AIWAH: queue the meeting for HQ Workshop sync (background, never blocks the save)
+            crate::hq::on_meeting_saved(&app, &meeting_id);
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Transcript saved successfully",

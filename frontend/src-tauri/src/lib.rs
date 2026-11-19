@@ -49,6 +49,7 @@ pub mod onboarding;
 pub mod openai;
 pub mod anthropic;
 pub mod groq;
+pub mod hq; // AIWAH: HQ Workshop sync
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
@@ -626,6 +627,9 @@ pub fn run() {
             };
             log::info!("Application setup complete");
 
+            // AIWAH: retry loop that pushes queued meetings to HQ Workshop
+            hq::start_background_sync(_app.handle());
+
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
@@ -852,6 +856,13 @@ pub fn run() {
             api::api_get_meeting_transcripts,
             api::api_save_meeting_title,
             api::api_save_transcript,
+            // AIWAH: HQ Workshop sync
+            hq::commands::hq_get_settings,
+            hq::commands::hq_save_settings,
+            hq::commands::hq_test_connection,
+            hq::commands::hq_get_sync_status,
+            hq::commands::hq_sync_meeting,
+            hq::commands::hq_sync_pending,
             api::open_meeting_folder,
             api::test_backend_connection,
             api::debug_backend_connection,

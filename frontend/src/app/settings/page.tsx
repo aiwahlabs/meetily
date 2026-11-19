@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical } from 'lucide-react';
+import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Building2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { motion } from 'framer-motion';
@@ -10,11 +10,13 @@ import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
+import { HqSettings } from '@/components/hq/HqSettings'; // AIWAH
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 // Tabs configuration (constant)
 const TABS = [
+  { value: 'hq', label: 'HQ', icon: Building2 }, // AIWAH
   { value: 'general', label: 'General', icon: Settings2 },
   { value: 'recording', label: 'Recordings', icon: Mic },
   { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
@@ -27,7 +29,7 @@ export default function SettingsPage() {
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
 
   // Animation state for tabs
-  const [activeTab, setActiveTab] = useState('general');
+  const [activeTab, setActiveTab] = useState('hq'); // AIWAH: HQ first
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [underlineStyle, setUnderlineStyle] = useState({ left: 0, width: 0 });
 
@@ -109,6 +111,9 @@ export default function SettingsPage() {
               />
             </TabsList>
 
+            <TabsContent value="hq">
+              <HqSettings />
+            </TabsContent>
             <TabsContent value="general">
               <PreferenceSettings />
             </TabsContent>

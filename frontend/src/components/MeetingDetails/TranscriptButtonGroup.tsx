@@ -7,6 +7,7 @@ import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { useConfig } from '@/contexts/ConfigContext';
+import { HqSyncButton } from '@/components/hq/HqSyncButton'; // AIWAH
 
 
 interface TranscriptButtonGroupProps {
@@ -85,6 +86,9 @@ export function TranscriptButtonGroup({
           </Button>
         )}
       </ButtonGroup>
+
+      {/* AIWAH: HQ Workshop sync */}
+      {meetingId && <HqSyncButton meetingId={meetingId} />}
 
       {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
         <RetranscribeDialog
