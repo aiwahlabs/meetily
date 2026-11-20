@@ -4,11 +4,11 @@ import {
   FormItem,
   FormMessage,
   FormLabel,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
+} from '@/components/ui-legacy/form';
+import { Input } from '@/components/ui-legacy/input';
 import { Eye, EyeOff } from 'lucide-react';
 import { Control } from 'react-hook-form'; // Import Control type
-import { Textarea } from '@/components/ui/textarea';
+import { Textarea } from '@/components/ui-legacy/textarea';
 
 type IInpuItemProps = {
   name: string;

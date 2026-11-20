@@ -133,6 +133,7 @@ pub async fn builtin_ai_download_model<R: Runtime>(
     state: State<'_, ModelManagerState>,
     model_name: String,
 ) -> Result<(), String> {
+    crate::autorec::require_signed_in(&app).await?; // AIWAH: models only after company sign-in
     let manager = {
         // Ensure manager is initialized
         {

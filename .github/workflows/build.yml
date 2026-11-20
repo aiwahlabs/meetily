@@ -654,6 +654,9 @@ jobs:
           # Supabase configuration (for online license verification)
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # AIWAH: company Google sign-in client, embedded at build time (autorec::calendar)
+          AIWAH_GOOGLE_CLIENT_ID: ${{ secrets.AIWAH_GOOGLE_CLIENT_ID }}
+          AIWAH_GOOGLE_CLIENT_SECRET: ${{ secrets.AIWAH_GOOGLE_CLIENT_SECRET }}
         with:
           projectPath: frontend
           includeUpdaterJson: ${{ inputs.release-id == '' }}
@@ -678,6 +681,9 @@ jobs:
           # Supabase configuration (for online license verification)
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # AIWAH: company Google sign-in client, embedded at build time (autorec::calendar)
+          AIWAH_GOOGLE_CLIENT_ID: ${{ secrets.AIWAH_GOOGLE_CLIENT_ID }}
+          AIWAH_GOOGLE_CLIENT_SECRET: ${{ secrets.AIWAH_GOOGLE_CLIENT_SECRET }}
         with:
           projectPath: frontend
           includeUpdaterJson: ${{ inputs.release-id == '' }}

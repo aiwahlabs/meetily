@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
-import { Switch } from './ui/switch';
+import { Switch } from './ui-legacy/switch';
 import { useConfig } from '@/contexts/ConfigContext';
 
 interface SummaryModelSettingsProps {

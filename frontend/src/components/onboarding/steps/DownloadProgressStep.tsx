@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Mic, Sparkles, Check, Loader2, Download } from 'lucide-react';
+import { Mic, Sparkles, Check, RotateCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
+import { ProgressCircle } from '@/components/ui/progress-circle';
+import { Alert } from '@/components/ui/alert';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { toast } from 'sonner';
-import { motion, AnimatePresence } from 'framer-motion';
 import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
 import type { ParakeetDownloadProgressEvent } from '@/lib/parakeet';
 
@@ -26,6 +28,8 @@ interface DownloadState {
 export function DownloadProgressStep() {
   const {
     goNext,
+    goPrevious,
+    accountOk,
     selectedSummaryModel,
     recommendedSummaryModel,
     parakeetDownloaded,
@@ -33,10 +37,7 @@ export function DownloadProgressStep() {
     summaryModelDownloaded,
     setSummaryModelDownloaded,
     startBackgroundDownloads,
-    completeOnboarding,
   } = useOnboarding();
-
-  const [isMac, setIsMac] = useState(false);
 
   const [parakeetState, setParakeetState] = useState<DownloadState>({
     status: parakeetDownloaded ? 'completed' : 'waiting',
@@ -54,7 +55,6 @@ export function DownloadProgressStep() {
     speedMbps: 0,
   });
 
-  const [isCompleting, setIsCompleting] = useState(false);
   const parakeetDownloadStartedRef = useRef(false);
   const summaryDownloadStartedRef = useRef(false);
   const retryingRef = useRef(false);
@@ -151,22 +151,9 @@ export function DownloadProgressStep() {
     }
   };
 
-  // Detect platform on mount
-  useEffect(() => {
-    const checkPlatform = async () => {
-      try {
-        const { platform } = await import('@tauri-apps/plugin-os');
-        setIsMac(platform() === 'macos');
-      } catch (e) {
-        setIsMac(navigator.userAgent.includes('Mac'));
-      }
-    };
-
-    checkPlatform();
-  }, []);
-
   // Start the required transcription model immediately; summary readiness must not block it.
   useEffect(() => {
+    if (!accountOk) return; // never download before sign-in
     if (parakeetDownloadStartedRef.current) return;
     parakeetDownloadStartedRef.current = true;
 
@@ -183,16 +170,17 @@ export function DownloadProgressStep() {
         setParakeetState((prev) => ({ ...prev, status: 'error', error: String(error) }));
       }
     });
-  }, []);
+  }, [accountOk]);
 
   // Start the selected summary model only after the backend recommendation is known.
   useEffect(() => {
+    if (!accountOk) return; // never download before sign-in
     if (summaryDownloadStartedRef.current) return;
     if (!selectedSummaryModel) return;
     summaryDownloadStartedRef.current = true;
 
     startSummaryDownload();
-  }, [selectedSummaryModel]);
+  }, [selectedSummaryModel, accountOk]);
 
   // Listen to Parakeet download progress
   useEffect(() => {
@@ -376,182 +364,109 @@ export function DownloadProgressStep() {
       });
     }
 
-    if (isMac) {
-      // macOS: Go to Permissions step (will complete after permissions granted)
-      goNext();
-    } else {
-      // Non-macOS: Complete onboarding immediately (downloads continue in background)
-      setIsCompleting(true);
-      try {
-        await completeOnboarding();
-
-        // Small delay to ensure state is saved before reload
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        window.location.reload();
-      } catch (error) {
-        console.error('Failed to complete onboarding:', error);
-        toast.error('Failed to complete setup', {
-          description: 'Please try again.',
-        });
-        setIsCompleting(false);
-      }
-    }
+    goNext();
   };
+
+  const fmtMb = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`);
 
   const renderDownloadCard = (
     title: string,
+    blurb: string,
     icon: React.ReactNode,
     state: DownloadState,
-    modelSize: string,
-    sizeUnit = 'MB'
-  ) => (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-center justify-between mb-4">
+    sizeLabel: string,
+    onRetry: () => void
+  ) => {
+    const failed = state.status === 'error' || state.status === 'cancelled';
+    return (
+      <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
-            {icon}
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            {state.status === 'completed' ? <Check className="size-5 text-primary" aria-hidden="true" /> : icon}
           </div>
-          <div>
-            <h3 className="font-medium text-gray-900">{title}</h3>
-            <p className="text-sm text-gray-500">{modelSize}</p>
+          <div className="min-w-0 flex-1">
+            <p className="text-title font-medium text-foreground">{title}</p>
+            <p className="text-sub text-muted-foreground">
+              {state.status === 'completed' ? 'Ready' : `${blurb} ${sizeLabel}`.trim()}
+            </p>
           </div>
-        </div>
-        <div>
-          {state.status === 'waiting' && (
-            <span className="text-sm text-gray-500">Waiting...</span>
-          )}
           {state.status === 'downloading' && (
-            <Loader2 className="w-5 h-5 text-gray-700 animate-spin" />
+            <ProgressCircle value={state.progress} size={32} label={`${title} download`} />
           )}
-          {state.status === 'completed' && (
-            <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center">
-              <Check className="w-4 h-4 text-green-600" />
-            </div>
-          )}
-          {state.status === 'error' && (
-            <span className="text-sm text-red-500">Failed</span>
-          )}
-          {state.status === 'cancelled' && (
-            <span className="text-sm text-gray-500">Cancelled</span>
-          )}
+          {state.status === 'waiting' && <span className="text-sub text-muted-foreground">Waiting</span>}
         </div>
-      </div>
 
-      {/* Progress Bar */}
-      {(state.status === 'downloading' || state.status === 'completed') && (
-        <div className="space-y-2">
-          <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-gray-700 to-gray-900 rounded-full transition-all duration-300"
-              style={{ width: `${state.progress}%` }}
+        {state.status === 'downloading' && (
+          <div className="mt-3">
+            <Progress
+              value={state.progress}
+              size="sm"
+              label={`${title} download`}
+              description={
+                <span className="flex justify-between">
+                  <span>
+                    {fmtMb(state.downloadedMb)}
+                    {state.totalMb > 0 ? ` of ${fmtMb(state.totalMb)}` : ''}
+                  </span>
+                  {state.speedMbps > 0 && <span>{state.speedMbps.toFixed(1)} MB/s</span>}
+                </span>
+              }
             />
           </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600">
-              {state.downloadedMb.toFixed(1)} {sizeUnit} / {state.totalMb.toFixed(1)} {sizeUnit}
-            </span>
-            <div className="flex items-center gap-2">
-              {state.speedMbps > 0 && (
-                <span className="text-gray-500">
-                  {state.speedMbps.toFixed(1)} {sizeUnit}/s
-                </span>
-              )}
-              <span className="font-semibold text-gray-900">
-                {Math.round(state.progress)}%
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
+        )}
 
-      {(state.status === 'error' || state.status === 'cancelled') && (
-        <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-sm text-red-600 font-medium">
-            {state.status === 'cancelled' ? 'Download cancelled' : 'Download Error'}
-          </p>
-          {state.error && <p className="text-xs text-red-500 mt-1">{state.error}</p>}
-          {(title === 'Transcription Engine' || title === 'Summary Engine') && (
-            <button
-              onClick={title === 'Transcription Engine' ? handleRetryDownload : handleRetrySummaryDownload}
-              className="mt-3 w-full h-9 px-4 bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              Try Again
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
+        {failed && (
+          <Alert
+            tone="destructive"
+            size="sm"
+            className="mt-3"
+            title={state.status === 'cancelled' ? 'Download cancelled' : 'Download failed'}
+            action={
+              <Button variant="outline" size="sm" onClick={onRetry}>
+                <RotateCw className="size-3.5" aria-hidden="true" />
+                Try again
+              </Button>
+            }
+          >
+            {state.error || 'Check your connection and try again.'}
+          </Alert>
+        )}
+      </div>
+    );
+  };
+
+  const bothDone = parakeetDownloaded && summaryModelDownloaded;
 
   return (
     <OnboardingContainer
-      title="Getting things ready"
-      description="You can start using Aiwah Minutes after downloading the Transcription Engine."
-      step={3}
-      totalSteps={isMac ? 4 : 3}
+      title="Download the models"
+      description="About 700 MB for transcription, plus a summary model. You can keep using your computer."
+      onBack={goPrevious}
+      onNext={handleContinue}
+      nextDisabled={!parakeetDownloaded}
+      nextLabel={parakeetDownloaded ? 'Continue' : 'Downloading…'}
+      footnote={
+        parakeetDownloaded && !bothDone
+          ? 'The summary model keeps downloading in the background.'
+          : undefined
+      }
     >
-      <div className="flex flex-col items-center space-y-6">
-        {/* Download Cards */}
-        <div className="w-full max-w-lg space-y-4">
-          {renderDownloadCard(
-            'Transcription Engine',
-            <Mic className="w-5 h-5 text-gray-600" />,
-            parakeetState,
-            '~670 MB'
-          )}
-
-          {renderDownloadCard(
-            'Summary Engine',
-            <Sparkles className="w-5 h-5 text-gray-600" />,
-            summaryState,
-            getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
-            'MiB'
-          )}
-        </div>
-
-        {/* Info Message - Only show when Parakeet is downloaded */}
-        <AnimatePresence>
-          {parakeetDownloaded && !summaryModelDownloaded && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.3, ease: 'easeOut' }}
-              className="w-full max-w-lg bg-gray-100 rounded-lg p-4 text-sm text-gray-800"
-            >
-              <div className="flex items-start gap-3">
-                <Download className="w-5 h-5 text-gray-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-medium">You can continue while this finishes</p>
-                  <p className="text-gray-700 mt-1">
-                    Download will continue in the background.
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Continue Button */}
-        <div className="w-full max-w-xs">
-          <Button
-            onClick={handleContinue}
-            disabled={!parakeetDownloaded || isCompleting}
-            className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {(isCompleting || !parakeetDownloaded) ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              'Continue'
-            )}
-          </Button>
-        </div>
-      </div>
+      {renderDownloadCard(
+        'Transcription',
+        'Turns speech into text on this device.',
+        <Mic className="size-5" aria-hidden="true" />,
+        parakeetState,
+        '',
+        handleRetryDownload
+      )}
+      {renderDownloadCard(
+        'Summaries',
+        'Writes the summary and action items.',
+        <Sparkles className="size-5" aria-hidden="true" />,
+        summaryState,
+        getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
+        handleRetrySummaryDownload
+      )}
     </OnboardingContainer>
   );
 }

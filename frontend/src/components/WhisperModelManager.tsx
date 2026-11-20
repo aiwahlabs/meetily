@@ -13,7 +13,7 @@ import {
   getModelTagline,
   WhisperAPI
 } from '../lib/whisper';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui-legacy/accordion';
 
 interface ModelManagerProps {
   selectedModel?: string;

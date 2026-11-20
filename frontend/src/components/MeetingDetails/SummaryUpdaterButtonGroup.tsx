@@ -1,7 +1,7 @@
 "use client";
 
-import { Button } from '@/components/ui/button';
-import { ButtonGroup } from '@/components/ui/button-group';
+import { Button } from '@/components/ui-legacy/button';
+import { ButtonGroup } from '@/components/ui-legacy/button-group';
 import { Copy, Save, Loader2 } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 

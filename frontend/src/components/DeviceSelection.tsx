@@ -4,9 +4,9 @@ import { listen } from '@tauri-apps/api/event';
 import { RefreshCw, Mic, Speaker, CircleHelp } from 'lucide-react';
 import { AudioLevelMeter, CompactAudioLevelMeter } from './AudioLevelMeter';
 import { AudioBackendSelector } from './AudioBackendSelector';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui-legacy/select';
+import { Label } from '@/components/ui-legacy/label';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui-legacy/tooltip';
 import Analytics from '@/lib/analytics';
 import {
   AudioDevice,

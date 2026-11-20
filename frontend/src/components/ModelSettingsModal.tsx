@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSidebar } from './Sidebar/SidebarProvider';
 import { invoke } from '@tauri-apps/api/core';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui-legacy/button';
 import { useOllamaDownload } from '@/contexts/OllamaDownloadContext';
 import { BuiltInModelManager } from '@/components/BuiltInModelManager';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui-legacy/input';
+import { Label } from '@/components/ui-legacy/label';
 import { useConfig } from '@/contexts/ConfigContext';
 import {
   Select,
@@ -13,12 +13,12 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Switch } from '@/components/ui/switch';
+} from '@/components/ui-legacy/select';
+import { Alert, AlertDescription } from '@/components/ui-legacy/alert';
+import { ScrollArea } from '@/components/ui-legacy/scroll-area';
+import { Switch } from '@/components/ui-legacy/switch';
 import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download, ExternalLink, Check, ChevronsUpDown } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui-legacy/popover';
 import {
   Command,
   CommandEmpty,
@@ -26,7 +26,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from '@/components/ui/command';
+} from '@/components/ui-legacy/command';
 import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
 

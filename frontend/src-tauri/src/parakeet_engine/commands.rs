@@ -380,6 +380,7 @@ pub async fn parakeet_download_model<R: Runtime>(
     app_handle: AppHandle<R>,
     model_name: String,
 ) -> Result<(), String> {
+    crate::autorec::require_signed_in(&app_handle).await?; // AIWAH: models only after company sign-in
     let engine = {
         let guard = PARAKEET_ENGINE.lock().unwrap();
         guard.as_ref().cloned()

@@ -20,6 +20,9 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { IdleHome } from '@/components/aiwah/home/IdleHome'; // AIWAH
+import { PermissionWarning } from '@/components/PermissionWarning';
+import { useIsLinux } from '@/hooks/usePlatform';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -36,7 +39,8 @@ export default function Home() {
   const { status, isStopping, isProcessing, isSaving } = recordingState;
 
   // Hooks
-  const { hasMicrophone } = usePermissionCheck();
+  const { hasMicrophone, hasSystemAudio, isChecking, checkPermissions } = usePermissionCheck();
+  const isLinux = useIsLinux();
   const { setIsMeetingActive, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
   const { isRecordingDisabled, setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
@@ -188,6 +192,11 @@ export default function Home() {
   // Computed values using global status
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
 
+  // AIWAH: idle = nothing recording or being processed -> show the home dashboard
+  const isIdle = !recordingState.isRecording && !isRecording && (
+    status === RecordingStatus.IDLE || status === RecordingStatus.COMPLETED || status === RecordingStatus.ERROR
+  );
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* All Modals supported*/}
@@ -207,14 +216,30 @@ export default function Home() {
         onLoadPreview={loadMeetingTranscripts}
       />
       <div className="flex flex-1 overflow-hidden">
-        <TranscriptPanel
-          isProcessingStop={isProcessingStop}
-          isStopping={isStopping}
-          showModal={showModal}
-        />
+        {isIdle ? (
+          <div className="w-full">
+            <IdleHome
+              onRecord={() => window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'))}
+              banner={!isChecking && !isLinux ? (
+                <PermissionWarning
+                  hasMicrophone={hasMicrophone}
+                  hasSystemAudio={hasSystemAudio}
+                  onRecheck={checkPermissions}
+                  isRechecking={isChecking}
+                />
+              ) : undefined}
+            />
+          </div>
+        ) : (
+          <TranscriptPanel
+            isProcessingStop={isProcessingStop}
+            isStopping={isStopping}
+            showModal={showModal}
+          />
+        )}
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
-        {(hasMicrophone || isRecording) &&
+        {!isIdle && (hasMicrophone || isRecording) &&
           status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
           status !== RecordingStatus.SAVING && (
             <div className="fixed bottom-12 left-0 right-0 z-10">

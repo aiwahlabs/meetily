@@ -15,10 +15,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+} from '@/components/ui-legacy/dialog';
+import { Button } from '@/components/ui-legacy/button';
+import { ScrollArea } from '@/components/ui-legacy/scroll-area';
+import { Alert, AlertDescription } from '@/components/ui-legacy/alert';
 import { MeetingMetadata, StoredTranscript } from '@/services/indexedDBService';
 import { cn } from '@/lib/utils';
 

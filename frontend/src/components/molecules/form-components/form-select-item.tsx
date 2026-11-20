@@ -4,7 +4,7 @@ import {
   FormLabel,
   FormControl,
   FormMessage,
-} from '@/components/ui/form';
+} from '@/components/ui-legacy/form';
 import {
   Select,
   SelectTrigger,
@@ -13,7 +13,7 @@ import {
   SelectValue,
   SelectGroup,
   SelectLabel,
-} from '@/components/ui/select';
+} from '@/components/ui-legacy/select';
 import { Control } from 'react-hook-form'; // Import Control type
 type ISelectItemProps = {
   name: string;

@@ -1,33 +1,60 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import * as PopoverPrimitive from "@radix-ui/react-popover"
+import * as React from "react";
+import * as PopoverPrimitive from "@radix-ui/react-popover";
+import { clsx, type ClassValue } from "clsx";
+import { extendTailwindMerge } from "tailwind-merge";
 
-import { cn } from "@/lib/utils"
+const SQUIRCLE = "[corner-shape:squircle]";
 
-const Popover = PopoverPrimitive.Root
+const LAYER = {
+  dialog: 70,
+  popover: 75,
+  toast: 80,
+} as const;
 
-const PopoverTrigger = PopoverPrimitive.Trigger
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      "font-size": [{ text: ["figure", "title", "body", "sub", "dense", "meta", "chip", "micro"] }],
+      shadow: [{ shadow: ["float", "overlay"] }],
+    },
+  },
+});
 
-const PopoverAnchor = PopoverPrimitive.Anchor
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
-const PopoverContent = React.forwardRef<
+export const Popover = PopoverPrimitive.Root;
+export const PopoverTrigger = PopoverPrimitive.Trigger;
+export const PopoverAnchor = PopoverPrimitive.Anchor;
+export const PopoverClose = PopoverPrimitive.Close;
+
+export const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
->(({ className, align = "center", sideOffset = 4, ...props }, ref) => (
-  <PopoverPrimitive.Portal>
-    <PopoverPrimitive.Content
-      ref={ref}
-      align={align}
-      sideOffset={sideOffset}
-      className={cn(
-        "z-50 w-72 rounded-md border bg-popover p-4 text-popover-foreground shadow-md outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-popover-content-transform-origin]",
-        className
-      )}
-      {...props}
-    />
-  </PopoverPrimitive.Portal>
-))
-PopoverContent.displayName = PopoverPrimitive.Content.displayName
+  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content> & {  inline?: boolean }
+>(function PopoverContent({ className, align = "center", sideOffset = 6, inline = false, style, ...props }, ref) {
+  const Wrap = inline ? React.Fragment : PopoverPrimitive.Portal;
+  return (
+    <Wrap>
+      <PopoverPrimitive.Content
+        ref={ref}
+        align={align}
+        sideOffset={sideOffset}
+        collisionPadding={8}
+        style={{ zIndex: LAYER.popover, ...style }}
+        className={cn(
+          "w-72 rounded-[18px] bg-popover p-3.5 text-popover-foreground shadow-float ring-1 ring-border outline-none",
+          "motion-safe:data-[state=open]:animate-pop-in motion-safe:data-[state=closed]:animate-pop-out",
+          "data-[side=top]:[--pop-y:4px]",
+          SQUIRCLE,
+          className,
+        )}
+        {...props}
+      />
+    </Wrap>
+  );
+});
 
-export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor }
+export default Popover;

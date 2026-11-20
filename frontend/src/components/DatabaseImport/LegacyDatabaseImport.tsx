@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui-legacy/dialog';
 import { Loader2, FolderOpen, Database, CheckCircle2, XCircle } from 'lucide-react';
 import { HomebrewDatabaseDetector } from './HomebrewDatabaseDetector';
 

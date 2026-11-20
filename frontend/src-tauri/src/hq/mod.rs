@@ -88,6 +88,7 @@ pub struct SyncRecord {
     pub mode: Option<String>,
     pub language: Option<String>,
     pub project_id: Option<String>,
+    pub lead_id: Option<String>,
     pub hq_meeting_id: Option<String>,
     pub attempts: i64,
     pub last_error: Option<String>,
@@ -123,7 +124,14 @@ pub async fn load_settings(pool: &SqlitePool) -> Result<HqSettings, String> {
     Ok(match row {
         Some((base_url, api_key, auto_sync, default_project_id, user_email, user_name)) => HqSettings {
             base_url: if base_url.trim().is_empty() { DEFAULT_BASE_URL.to_string() } else { base_url },
-            api_key,
+            // AIWAH: the key lives in the OS credential store; move a legacy DB copy there.
+            api_key: {
+                let (key, migrated) = crate::autorec::secrets::load(crate::autorec::secrets::HQ_API_KEY, api_key);
+                if migrated {
+                    let _ = sqlx::query("UPDATE hq_settings SET api_key = NULL WHERE id = ?").bind(SETTINGS_ID).execute(pool).await;
+                }
+                key
+            },
             auto_sync: auto_sync != 0,
             default_project_id,
             user_email,
@@ -148,7 +156,10 @@ pub async fn save_settings(pool: &SqlitePool, settings: &HqSettings) -> Result<(
     )
     .bind(SETTINGS_ID)
     .bind(settings.base_url.trim().trim_end_matches('/'))
-    .bind(settings.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty()))
+    .bind(crate::autorec::secrets::stash(
+        crate::autorec::secrets::HQ_API_KEY,
+        settings.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty()),
+    ))
     .bind(if settings.auto_sync { 1i64 } else { 0i64 })
     .bind(settings.default_project_id.as_deref().filter(|p| !p.trim().is_empty()))
     .bind(&settings.user_email)
@@ -164,7 +175,7 @@ pub async fn save_settings(pool: &SqlitePool, settings: &HqSettings) -> Result<(
 
 pub async fn get_sync_records(pool: &SqlitePool, meeting_ids: &[String]) -> Result<Vec<SyncRecord>, String> {
     let all: Vec<SyncRecord> = sqlx::query_as(
-        "SELECT meeting_id, status, mode, language, project_id, hq_meeting_id, attempts, last_error, updated_at
+        "SELECT meeting_id, status, mode, language, project_id, lead_id, hq_meeting_id, attempts, last_error, updated_at
          FROM hq_meeting_sync",
     )
     .fetch_all(pool)
@@ -178,7 +189,7 @@ pub async fn get_sync_records(pool: &SqlitePool, meeting_ids: &[String]) -> Resu
 
 async fn get_sync_record(pool: &SqlitePool, meeting_id: &str) -> Result<Option<SyncRecord>, String> {
     sqlx::query_as(
-        "SELECT meeting_id, status, mode, language, project_id, hq_meeting_id, attempts, last_error, updated_at
+        "SELECT meeting_id, status, mode, language, project_id, lead_id, hq_meeting_id, attempts, last_error, updated_at
          FROM hq_meeting_sync WHERE meeting_id = ?",
     )
     .bind(meeting_id)
@@ -194,6 +205,7 @@ pub async fn enqueue(
     meeting_id: &str,
     language: Option<String>,
     project_id: Option<String>,
+    lead_id: Option<String>,
     force: bool,
 ) -> Result<(), String> {
     if let Some(existing) = get_sync_record(pool, meeting_id).await? {
@@ -202,11 +214,13 @@ pub async fn enqueue(
         }
         sqlx::query(
             "UPDATE hq_meeting_sync SET status = 'pending', attempts = 0, last_error = NULL,
-               language = COALESCE(?, language), project_id = COALESCE(?, project_id), updated_at = ?
+               language = COALESCE(?, language), project_id = COALESCE(?, project_id),
+               lead_id = COALESCE(?, lead_id), updated_at = ?
              WHERE meeting_id = ?",
         )
         .bind(&language)
         .bind(&project_id)
+        .bind(&lead_id)
         .bind(now_str())
         .bind(meeting_id)
         .execute(pool)
@@ -216,12 +230,13 @@ pub async fn enqueue(
     }
 
     sqlx::query(
-        "INSERT INTO hq_meeting_sync (meeting_id, status, language, project_id, attempts, updated_at)
-         VALUES (?, 'pending', ?, ?, 0, ?)",
+        "INSERT INTO hq_meeting_sync (meeting_id, status, language, project_id, lead_id, attempts, updated_at)
+         VALUES (?, 'pending', ?, ?, ?, 0, ?)",
     )
     .bind(meeting_id)
     .bind(&language)
     .bind(&project_id)
+    .bind(&lead_id)
     .bind(now_str())
     .execute(pool)
     .await
@@ -402,12 +417,175 @@ pub async fn fetch_identity(settings: &HqSettings) -> Result<HqIdentity, String>
     Ok(HqIdentity { email: s("email"), name: s("name").or_else(|| s("displayName")), kind: s("kind") })
 }
 
+/// A project or lead a meeting can be tagged with.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HqTarget {
+    pub id: String,
+    /// "project" | "lead"
+    pub kind: &'static str,
+    pub label: String,
+}
+
+async fn get_json(settings: &HqSettings, path: &str) -> Result<serde_json::Value, String> {
+    let key = settings.api_key.as_deref().ok_or("Add your HQ API key first")?;
+    let resp = client(Duration::from_secs(20))?
+        .get(settings.url(path))
+        .bearer_auth(key.trim())
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach HQ at {}: {}", settings.base_url, e))?;
+    if !resp.status().is_success() {
+        return Err(error_from_response(resp).await);
+    }
+    resp.json().await.map_err(|e| format!("Unexpected HQ response: {}", e))
+}
+
+/// Projects (active ones first) and leads the key can see, for the per-meeting picker.
+/// A failure to list leads does not hide the projects, and vice versa.
+pub async fn list_targets(settings: &HqSettings) -> Result<Vec<HqTarget>, String> {
+    let mut targets: Vec<HqTarget> = Vec::new();
+    let projects = get_json(settings, "/v1/projects").await;
+    let leads = get_json(settings, "/v1/leads").await;
+    if let (Err(e), Err(_)) = (&projects, &leads) {
+        return Err(e.clone());
+    }
+    if let Ok(body) = projects {
+        let mut items: Vec<&serde_json::Value> = body.get("items").and_then(|v| v.as_array()).map(|a| a.iter().collect()).unwrap_or_default();
+        let done = |p: &serde_json::Value| matches!(p.get("status").and_then(|v| v.as_str()), Some("DONE") | Some("CANCELLED"));
+        items.sort_by_key(|p| done(p));
+        for p in items {
+            if let (Some(id), Some(name)) = (p.get("id").and_then(|v| v.as_str()), p.get("name").and_then(|v| v.as_str())) {
+                targets.push(HqTarget { id: id.to_string(), kind: "project", label: name.to_string() });
+            }
+        }
+    }
+    if let Ok(body) = leads {
+        for l in body.get("leads").and_then(|v| v.as_array()).into_iter().flatten() {
+            let id = l.get("id").and_then(|v| v.as_str());
+            let name = l.get("projectName").and_then(|v| v.as_str()).or_else(|| l.get("name").and_then(|v| v.as_str()));
+            if let (Some(id), Some(name)) = (id, name) {
+                let label = match l.get("leadNumber").and_then(|v| v.as_i64()) {
+                    Some(n) => format!("AL{} — {}", n, name),
+                    None => name.to_string(),
+                };
+                targets.push(HqTarget { id: id.to_string(), kind: "lead", label });
+            }
+        }
+    }
+    Ok(targets)
+}
+
+/// AIWAH: what the call watcher knows about a meeting.
+struct CallExtras {
+    hq_platform: &'static str,
+    /// Calendar attendees other than the user: (email, name).
+    attendees: Vec<(String, Option<String>)>,
+}
+
+impl CallExtras {
+    fn from_meta(meta: Option<&crate::autorec::meta::MeetingMeta>) -> Self {
+        match meta {
+            Some(m) => Self {
+                hq_platform: crate::autorec::platform::CallPlatform::from_str(&m.platform).hq_platform(),
+                attendees: m
+                    .attendees
+                    .iter()
+                    .filter(|a| !a.is_self && a.email.contains('@'))
+                    .map(|a| (a.email.clone(), a.name.clone()))
+                    .collect(),
+            },
+            None => Self { hq_platform: "OTHER", attendees: Vec::new() },
+        }
+    }
+
+    /// The user (so HQ shows them the meeting) plus the calendar attendees.
+    fn people(&self, settings: &HqSettings) -> Vec<serde_json::Value> {
+        let mut people = attendees(settings);
+        let mut seen: std::collections::HashSet<String> = settings.user_email.iter().map(|e| e.to_lowercase()).collect();
+        for (email, name) in &self.attendees {
+            if seen.insert(email.to_lowercase()) {
+                people.push(serde_json::json!({ "email": email, "name": name }));
+            }
+        }
+        people
+    }
+}
+
+/// True if `needle` appears in `hay` as its own token (e.g. "al111" but not "al1110").
+fn contains_token(hay: &str, needle: &str) -> bool {
+    let mut from = 0;
+    while let Some(pos) = hay[from..].find(needle) {
+        let start = from + pos;
+        let end = start + needle.len();
+        let before_ok = hay[..start].chars().next_back().map(|c| !c.is_alphanumeric()).unwrap_or(true);
+        let after_ok = hay[end..].chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(true);
+        if before_ok && after_ok {
+            return true;
+        }
+        from = end;
+    }
+    false
+}
+
+/// AIWAH: match a meeting to an HQ lead (attendee email, or "AL<n>" in the title)
+/// or project (project name in the title). Returns (project_id, lead_id).
+async fn auto_link(settings: &HqSettings, title: &str, extras: &CallExtras) -> (Option<String>, Option<String>) {
+    let own_domain = settings.user_email.as_deref().and_then(|e| e.rsplit_once('@')).map(|(_, d)| d.to_lowercase());
+    let external: Vec<String> = extras
+        .attendees
+        .iter()
+        .map(|(e, _)| e.trim().to_lowercase())
+        .filter(|e| own_domain.as_deref().map(|d| !e.ends_with(&format!("@{}", d))).unwrap_or(true))
+        .collect();
+    let title_l = title.to_lowercase();
+    let text = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+
+    if let Ok(body) = get_json(settings, "/v1/leads").await {
+        let leads = body.get("leads").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        for l in &leads {
+            if let (Some(id), Some(email)) = (text(l, "id"), text(l, "email")) {
+                if external.iter().any(|e| *e == email.trim().to_lowercase()) {
+                    return (None, Some(id));
+                }
+            }
+        }
+        for l in &leads {
+            if let (Some(id), Some(n)) = (text(l, "id"), l.get("leadNumber").and_then(|v| v.as_i64())) {
+                if contains_token(&title_l, &format!("al{}", n)) {
+                    return (None, Some(id));
+                }
+            }
+        }
+    }
+    if let Ok(body) = get_json(settings, "/v1/projects").await {
+        for p in body.get("items").and_then(|v| v.as_array()).into_iter().flatten() {
+            if matches!(p.get("status").and_then(|v| v.as_str()), Some("DONE") | Some("CANCELLED")) {
+                continue;
+            }
+            if let (Some(id), Some(name)) = (text(p, "id"), text(p, "name")) {
+                let core = name.split(" (").next().unwrap_or(&name).trim().to_lowercase();
+                if core.chars().count() >= 5 && title_l.contains(&core) {
+                    return (Some(id), None);
+                }
+            }
+        }
+    }
+    (None, None)
+}
+
 enum PushOutcome {
     Synced { mode: &'static str, hq_meeting_id: Option<String> },
     UploadUnsupported,
 }
 
-async fn push_ingest(settings: &HqSettings, meeting: &LocalMeeting, project_id: Option<&str>) -> Result<PushOutcome, String> {
+async fn push_ingest(
+    settings: &HqSettings,
+    meeting: &LocalMeeting,
+    project_id: Option<&str>,
+    lead_id: Option<&str>,
+    extras: &CallExtras,
+) -> Result<PushOutcome, String> {
     let transcript = meeting.transcript_text();
     if transcript.trim().is_empty() {
         return Err("Meeting has no transcript text to sync".to_string());
@@ -427,14 +605,15 @@ async fn push_ingest(settings: &HqSettings, meeting: &LocalMeeting, project_id: 
     let mut body = serde_json::json!({
         "title": meeting.title(),
         "transcript": transcript,
-        "platform": "OTHER",
+        "platform": extras.hq_platform,
         "segments": segments,
         "startedAt": started_at,
         "endedAt": ended_at,
     });
-    let people = attendees(settings);
+    let people = extras.people(settings);
     if !people.is_empty() { body["attendees"] = serde_json::json!(people); }
     if let Some(p) = project_id { body["projectId"] = serde_json::json!(p); }
+    if let Some(l) = lead_id { body["leadId"] = serde_json::json!(l); }
 
     let resp = client(Duration::from_secs(60))?
         .post(settings.url("/v1/meetings/ingest"))
@@ -473,6 +652,7 @@ async fn push_upload(
     recording: &Path,
     language: &str,
     project_id: Option<&str>,
+    extras: &CallExtras,
 ) -> Result<PushOutcome, String> {
     let size = tokio::fs::metadata(recording).await.map_err(|e| format!("Recording not readable: {}", e))?.len();
     if size == 0 {
@@ -493,7 +673,7 @@ async fn push_upload(
         ("source", "aiwah-minutes-desktop".to_string()),
     ];
     if let Some(p) = project_id { query.push(("projectId", p.to_string())); }
-    let people = attendees(settings);
+    let people = extras.people(settings);
     if !people.is_empty() { query.push(("attendees", serde_json::json!(people).to_string())); }
 
     let resp = client(Duration::from_secs(30 * 60))?
@@ -538,34 +718,55 @@ pub async fn process_meeting<R: Runtime>(app: &AppHandle<R>, pool: &SqlitePool, 
             return Ok("skipped".to_string());
         }
     };
-    let project_id = record.project_id.clone().or_else(|| settings.default_project_id.clone());
+    // AIWAH: platform + calendar attendees from the call watcher; auto-link to an
+    // HQ lead/project when the user did not pick one.
+    let call_meta = crate::autorec::meta::get_meta(pool, meeting_id).await;
+    let extras = CallExtras::from_meta(call_meta.as_ref());
+    let (mut project_id, mut lead_id) = (record.project_id.clone(), record.lead_id.clone());
+    if project_id.is_none() && lead_id.is_none() {
+        let (p, l) = auto_link(&settings, &meeting.title(), &extras).await;
+        if p.is_some() || l.is_some() {
+            log::info!("Auto-linked meeting to an HQ {}", if l.is_some() { "lead" } else { "project" });
+        }
+        project_id = p;
+        lead_id = l;
+    }
+    let project_id = project_id.or_else(|| settings.default_project_id.clone());
     let language = record.language.clone();
 
     let outcome = if is_indic_language(language.as_deref()) {
         match find_recording(meeting.folder_path.as_deref()) {
             Some(recording) => {
                 let lang = language.as_deref().unwrap_or("ml");
-                match push_upload(&settings, &meeting, &recording, lang, project_id.as_deref()).await {
+                match push_upload(&settings, &meeting, &recording, lang, project_id.as_deref(), &extras).await {
                     Ok(PushOutcome::UploadUnsupported) => {
                         log::warn!("HQ does not accept recording uploads yet; falling back to transcript ingest");
-                        push_ingest(&settings, &meeting, project_id.as_deref()).await
+                        push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras).await
                     }
                     other => other,
                 }
             }
             None => {
                 log::warn!("Indic meeting has no recording file; syncing local transcript instead");
-                push_ingest(&settings, &meeting, project_id.as_deref()).await
+                push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras).await
             }
         }
     } else {
-        push_ingest(&settings, &meeting, project_id.as_deref()).await
+        push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras).await
     };
 
     match outcome {
         Ok(PushOutcome::Synced { mode, hq_meeting_id }) => {
             mark(pool, meeting_id, "synced", Some(mode), hq_meeting_id.as_deref(), None, true).await?;
             log::info!("Meeting synced to HQ (mode={})", mode);
+            if crate::autorec::settings::load(pool).await.delete_audio_after_sync {
+                if let Some(path) = find_recording(meeting.folder_path.as_deref()) {
+                    match tokio::fs::remove_file(&path).await {
+                        Ok(()) => log::info!("Deleted local audio after HQ sync (privacy setting)"),
+                        Err(e) => log::warn!("Could not delete local audio after sync: {}", e),
+                    }
+                }
+            }
             emit(app, meeting_id, "synced", hq_meeting_id, None);
             Ok("synced".to_string())
         }
@@ -610,7 +811,18 @@ pub fn on_meeting_saved<R: Runtime>(app: &AppHandle<R>, meeting_id: &str) {
     tauri::async_runtime::spawn(async move {
         let Some(state) = app.try_state::<AppState>() else { return };
         let pool = state.db_manager.pool().clone();
-        if let Err(e) = enqueue(&pool, &meeting_id, language, None, false).await {
+        // AIWAH: remember platform / calendar event / meeting type for folders and HQ.
+        let self_email = load_settings(&pool).await.ok().and_then(|s| s.user_email);
+        crate::autorec::meta::persist_for_meeting(&pool, &meeting_id, self_email.as_deref()).await;
+        let title: Option<String> = sqlx::query_as::<_, (String,)>("SELECT title FROM meetings WHERE id = ?")
+            .bind(&meeting_id)
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(t,)| t);
+        crate::autorec::watcher::on_meeting_saved(&app, &meeting_id, title);
+        if let Err(e) = enqueue(&pool, &meeting_id, language, None, None, false).await {
             log::warn!("Could not queue meeting for HQ sync: {}", e);
             return;
         }

@@ -1,17 +1,18 @@
 'use client'
 
 import './globals.css'
-import { Source_Sans_3 } from 'next/font/google'
+import { Source_Sans_3, Inter, Manrope } from 'next/font/google'
 import Sidebar from '@/components/Sidebar'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
 import AnalyticsProvider from '@/components/AnalyticsProvider'
 import { Toaster, toast } from 'sonner'
 import "sonner/dist/styles.css"
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
+import { usePathname } from 'next/navigation' // AIWAH
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
-import { TooltipProvider } from '@/components/ui/tooltip'
+import { TooltipProvider } from '@/components/ui-legacy/tooltip'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
 import { TranscriptProvider } from '@/contexts/TranscriptContext'
@@ -24,6 +25,8 @@ import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
 import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcessingProvider'
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
+import { useAccountStatus } from '@/components/aiwah/useAccountStatus'
+import { GoogleSignInCard } from '@/components/aiwah/GoogleSignInCard'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 
 
@@ -32,6 +35,10 @@ const sourceSans3 = Source_Sans_3({
   weight: ['400', '500', '600', '700'],
   variable: '--font-source-sans-3',
 })
+
+// AIWAH: brand fonts (Inter for UI text, Manrope for headings)
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
+const manrope = Manrope({ subsets: ['latin'], weight: ['500', '600', '700', '800'], variable: '--font-manrope' })
 
 // Module-level component — stable reference across RootLayout re-renders.
 // Defined here (not inside RootLayout) so React never sees a new function type
@@ -61,9 +68,40 @@ function ConditionalImportDialog({
   );
 }
 
+// AIWAH: signed-out gate. Only a known "not signed in / wrong domain" blocks the app;
+// if the account command is unavailable the shell still renders.
+function AccountGate({ children }: { children: React.ReactNode }) {
+  const { status, loading } = useAccountStatus()
+  if (loading) return <div className="min-h-screen bg-background" />
+  if (status && (!status.signedIn || !status.domainOk)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <GoogleSignInCard onSignedIn={() => window.location.reload()} />
+      </div>
+    )
+  }
+  return <>{children}</>
+}
+
 // export { metadata } from './metadata'
 
-export default function RootLayout({
+// AIWAH: the floating record button window (/floating) renders without the app
+// shell, so it never runs onboarding, the sidebar or recording post-processing.
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+  if (pathname?.startsWith('/floating')) {
+    return (
+      <html lang="en" style={{ background: 'transparent' }}>
+        <body className={`${sourceSans3.variable} ${inter.variable} ${manrope.variable} font-sans antialiased`} style={{ background: 'transparent', margin: 0, overflow: 'hidden' }}>
+          {children}
+        </body>
+      </html>
+    )
+  }
+  return <AppLayout>{children}</AppLayout>
+}
+
+function AppLayout({
   children,
 }: {
   children: React.ReactNode
@@ -232,7 +270,7 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${sourceSans3.variable} font-sans antialiased`}>
+      <body className={`${sourceSans3.variable} ${inter.variable} ${manrope.variable} font-sans antialiased`}>
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>
@@ -251,10 +289,14 @@ export default function RootLayout({
                               {showOnboarding ? (
                                 <OnboardingFlow onComplete={handleOnboardingComplete} />
                               ) : (
-                                <div className="flex">
-                                  <Sidebar />
-                                  <MainContent>{children}</MainContent>
-                                </div>
+                                <AccountGate>
+                                  <div className="flex">
+                                    <Suspense fallback={null}>
+                                      <Sidebar />
+                                    </Suspense>
+                                    <MainContent>{children}</MainContent>
+                                  </div>
+                                </AccountGate>
                               )}
                               {/* Import audio overlay and dialog */}
                               <ImportDropOverlay visible={showDropOverlay} />

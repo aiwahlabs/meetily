@@ -1,37 +1,83 @@
 'use client';
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Building2 } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import {
+  ArrowLeft,
+  Building2,
+  FlaskConical,
+  Mic,
+  Radar,
+  Settings2,
+  ShieldCheck,
+  SparkleIcon,
+  User,
+  Database as DatabaseIcon,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
-import { motion } from 'framer-motion';
 import { TranscriptSettings } from '@/components/TranscriptSettings';
 import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
-import { HqSettings } from '@/components/hq/HqSettings'; // AIWAH
 import { useConfig } from '@/contexts/ConfigContext';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { SettingsPage, SettingsSection, type SettingsSectionLink } from '@/components/ui/settings-page';
+import { AccountSection } from '@/components/aiwah/settings/AccountSection';
+import { CallDetectionSection, PrivacySection, useAutoRec } from '@/components/aiwah/settings/CallDetectionSection';
+import { HqSection, useHqForm } from '@/components/aiwah/settings/HqSection';
 
-// Tabs configuration (constant)
-const TABS = [
-  { value: 'hq', label: 'HQ', icon: Building2 }, // AIWAH
-  { value: 'general', label: 'General', icon: Settings2 },
-  { value: 'recording', label: 'Recordings', icon: Mic },
-  { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
-  { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
-  { value: 'beta', label: 'Beta', icon: FlaskConical }
-] as const;
+const SECTIONS: SettingsSectionLink[] = [
+  { id: 'account', title: 'Account', icon: <User /> },
+  { id: 'call-detection', title: 'Call detection', icon: <Radar /> },
+  { id: 'privacy', title: 'Privacy', icon: <ShieldCheck /> },
+  { id: 'hq', title: 'HQ Workshop', icon: <Building2 /> },
+  { id: 'transcription', title: 'Transcription', icon: <DatabaseIcon /> },
+  { id: 'summary', title: 'Summary', icon: <SparkleIcon /> },
+  { id: 'recordings', title: 'Recordings', icon: <Mic /> },
+  { id: 'general', title: 'General', icon: <Settings2 /> },
+  { id: 'beta', title: 'Beta', icon: <FlaskConical /> },
+];
 
-export default function SettingsPage() {
+export default function SettingsRoute() {
   const router = useRouter();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
+  const autorec = useAutoRec();
+  const hq = useHqForm();
+  const scroller = useRef<HTMLDivElement>(null);
 
-  // Animation state for tabs
-  const [activeTab, setActiveTab] = useState('hq'); // AIWAH: HQ first
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const [underlineStyle, setUnderlineStyle] = useState({ left: 0, width: 0 });
+  // The app shell never scrolls (body and <main> are overflow-hidden), so this wrapper is the
+  // scroll container. SettingsPage's own scroll-spy observes the window viewport and does not
+  // follow it, so keep the section list highlighted from the wrapper's scroll position.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const on = ['bg-accent', 'font-medium', 'text-foreground'];
+    const off = ['text-muted-foreground', 'hover:bg-accent/60', 'hover:text-foreground'];
+    const sync = () => {
+      const secs = Array.from(el.querySelectorAll<HTMLElement>('[data-settings-section]')).filter((n) => n.offsetParent !== null);
+      if (!secs.length) return;
+      const line = el.getBoundingClientRect().top + el.clientHeight * 0.4;
+      let id = secs[0].id;
+      for (const n of secs) if (n.getBoundingClientRect().top <= line) id = n.id;
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 4) id = secs[secs.length - 1].id;
+      const buttons = Array.from(el.querySelectorAll<HTMLButtonElement>('nav[aria-label="Settings sections"] button'));
+      buttons.forEach((b, i) => {
+        const active = SECTIONS[i] && `settings-${SECTIONS[i].id}` === id;
+        b.classList.remove(...(active ? off : on));
+        b.classList.add(...(active ? on : off));
+        if (active) b.setAttribute('aria-current', 'true');
+        else b.removeAttribute('aria-current');
+      });
+    };
+    sync();
+    el.addEventListener('scroll', sync, { passive: true });
+    window.addEventListener('resize', sync);
+    return () => {
+      el.removeEventListener('scroll', sync);
+      window.removeEventListener('resize', sync);
+    };
+  }, []);
 
   // Load saved transcript configuration on mount
   useEffect(() => {
@@ -39,7 +85,6 @@ export default function SettingsPage() {
       try {
         const config = await invoke('api_get_transcript_config') as any;
         if (config) {
-          console.log('Loaded saved transcript config:', config);
           setTranscriptModelConfig({
             provider: config.provider || 'localWhisper',
             model: config.model || 'large-v3',
@@ -53,88 +98,64 @@ export default function SettingsPage() {
     loadTranscriptConfig();
   }, [setTranscriptModelConfig]);
 
-  // Update underline position when active tab changes
-  useLayoutEffect(() => {
-    const activeIndex = TABS.findIndex(tab => tab.value === activeTab);
-    const activeTabElement = tabRefs.current[activeIndex];
-
-    if (activeTabElement) {
-      const { offsetLeft, offsetWidth } = activeTabElement;
-      setUnderlineStyle({ left: offsetLeft, width: offsetWidth });
-    }
-  }, [activeTab]);
-
   return (
-    <div className="h-screen bg-gray-50 flex flex-col">
-      {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-8 py-6">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-              <span>Back</span>
-            </button>
-            <h1 className="text-3xl font-bold">Settings</h1>
-          </div>
-        </div>
-      </div>
+    <div ref={scroller} className="h-screen overflow-y-auto bg-background">
+      <div className="mx-auto max-w-4xl px-6 py-6">
+        <Button variant="ghost" size="sm" className="-ml-2 mb-3" onClick={() => router.back()}>
+          <ArrowLeft aria-hidden />
+          Back
+        </Button>
 
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-8 pt-6">
-          {/* Tabs */}
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto">
-              {TABS.map((tab, index) => {
-                const Icon = tab.icon;
-                return (
-                  <TabsTrigger
-                    key={tab.value}
-                    value={tab.value}
-                    ref={el => { tabRefs.current[index] = el }}
-                    className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none text-gray-600 hover:text-gray-900 relative z-10"
-                  >
-                    <Icon className="w-4 h-4" />
-                    {tab.label}
-                  </TabsTrigger>
-                );
-              })}
+        <SettingsPage
+          title="Settings"
+          sections={SECTIONS}
+          dirty={hq.dirty}
+          onSave={hq.save}
+          onDiscard={hq.discard}
+        >
+          <AccountSection />
+          <CallDetectionSection api={autorec} />
+          <PrivacySection api={autorec} />
+          <HqSection form={hq} />
 
-              <motion.div
-                className="absolute bottom-0 z-20 h-0.5 bg-blue-600"
-                layoutId="underline"
-                style={{ left: underlineStyle.left, width: underlineStyle.width }}
-                transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-              />
-            </TabsList>
-
-            <TabsContent value="hq">
-              <HqSettings />
-            </TabsContent>
-            <TabsContent value="general">
-              <PreferenceSettings />
-            </TabsContent>
-            <TabsContent value="recording">
-              <RecordingSettings />
-            </TabsContent>
-            <TabsContent value="Transcriptionmodels">
+          <SettingsSection
+            id="transcription"
+            title="Transcription"
+            description="The speech-to-text model used on this device."
+          >
+            <div className="p-4">
               <TranscriptSettings
                 transcriptModelConfig={transcriptModelConfig}
                 setTranscriptModelConfig={setTranscriptModelConfig}
               />
-            </TabsContent>
-            <TabsContent value="summaryModels">
+            </div>
+          </SettingsSection>
+
+          <SettingsSection id="summary" title="Summary" description="Which model writes meeting summaries.">
+            <div className="p-4">
               <SummaryModelSettings />
-            </TabsContent>
-            <TabsContent value="beta" className="mt-6">
+            </div>
+          </SettingsSection>
+
+          <SettingsSection id="recordings" title="Recordings" description="Where recordings are saved and which devices are used.">
+            <div className="p-4">
+              <RecordingSettings />
+            </div>
+          </SettingsSection>
+
+          <SettingsSection id="general" title="General" description="App preferences.">
+            <div className="p-4">
+              <PreferenceSettings />
+            </div>
+          </SettingsSection>
+
+          <SettingsSection id="beta" title="Beta" description="Experimental features that may change.">
+            <div className="p-4">
               <BetaSettings />
-            </TabsContent>
-          </Tabs>
-        </div>
+            </div>
+          </SettingsSection>
+        </SettingsPage>
       </div>
     </div>
   );
-};
+}

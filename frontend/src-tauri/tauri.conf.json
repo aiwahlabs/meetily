@@ -1,7 +1,7 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
     "productName": "Aiwah Minutes",
-    "version": "0.5.0",
+    "version": "0.7.0",
     "identifier": "com.aiwahlabs.minutes",
     "build": {
         "frontendDist": "../out",
@@ -19,7 +19,8 @@
                 "resizable": true,
                 "fullscreen": false,
                 "theme": "Light",
-                "decorations": true
+                "decorations": true,
+                "visible": false
             }
         ],
         "macOSPrivateApi": true,
@@ -41,7 +42,8 @@
                     "identifier": "main",
                     "description": "Main window capability with file system and media access",
                     "windows": [
-                        "main"
+                        "main",
+                        "floating"
                     ],
                     "permissions": [
                         "fs:default",
@@ -73,7 +75,8 @@
                                     "path": "$APPDATA/*"
                                 }
                             ]
-                        }
+                        },
+                        "core:window:allow-start-dragging"
                     ]
                 }
             ]

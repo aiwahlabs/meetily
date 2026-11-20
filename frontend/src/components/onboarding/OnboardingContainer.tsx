@@ -1,104 +1,70 @@
-import React from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { ProgressIndicator } from './shared/ProgressIndicator';
-import { useOnboarding } from '@/contexts/OnboardingContext';
-import type { OnboardingContainerProps } from '@/types/onboarding';
+'use client';
 
+import React from 'react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+
+export interface OnboardingContainerProps {
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  children?: React.ReactNode;
+  /** Primary action, bottom-right. */
+  onNext?: () => void;
+  nextLabel?: string;
+  nextDisabled?: boolean;
+  nextLoading?: boolean;
+  /** Ghost "Back" button, bottom-left. */
+  onBack?: () => void;
+  /** Quiet extra action next to the primary one, e.g. "Skip for now". */
+  secondary?: React.ReactNode;
+  /** Shown under the footer, e.g. why Continue is disabled. */
+  footnote?: React.ReactNode;
+  className?: string;
+}
+
+/** Content column of one onboarding step: heading, body, and the footer actions. */
 export function OnboardingContainer({
   title,
   description,
   children,
-  step,
-  totalSteps = 5,
-  stepOffset = 0,
-  hideProgress = false,
-  className,
-  showNavigation = false,
   onNext,
-  onPrevious,
-  canGoNext = true,
-  canGoPrevious = true,
+  nextLabel = 'Continue',
+  nextDisabled,
+  nextLoading,
+  onBack,
+  secondary,
+  footnote,
+  className,
 }: OnboardingContainerProps) {
-  const { goToStep, goPrevious, goNext } = useOnboarding();
-
-  const handlePrevious = () => {
-    if (onPrevious) {
-      onPrevious();
-    } else {
-      goPrevious();
-    }
-  };
-
-  const handleNext = () => {
-    if (onNext) {
-      onNext();
-    } else {
-      goNext();
-    }
-  };
-
-  const handleStepClick = (s: number) => {
-    goToStep(s + stepOffset);
-  };
-
   return (
-    <div className="fixed inset-0 bg-gray-50 flex items-center justify-center z-50 overflow-hidden">
-      <div className={cn('w-full max-w-2xl h-full max-h-screen flex flex-col px-6 py-6', className)}>
-        {/* Progress Indicator with Navigation - Fixed */}
-        {step && !hideProgress && (
-          <div className="mb-2 relative flex-shrink-0">
-            {/* Navigation Buttons */}
-            {showNavigation && (
-              <div className="absolute top-1/2 -translate-y-1/2 left-0 right-0 flex justify-between pointer-events-none">
-                <button
-                  onClick={handlePrevious}
-                  disabled={!canGoPrevious || step === 1}
-                  className={cn(
-                    'pointer-events-auto w-8 h-8 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center transition-all duration-200',
-                    canGoPrevious && step !== 1
-                      ? 'hover:bg-gray-50 hover:shadow-md hover:scale-110 text-gray-700'
-                      : 'opacity-0 cursor-not-allowed'
-                  )}
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
+    <div className={cn('mx-auto flex w-full max-w-[480px] flex-col', className)}>
+      <header className="mb-6">
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
+        {description && <p className="mt-2 text-body text-muted-foreground">{description}</p>}
+      </header>
 
-                <button
-                  onClick={handleNext}
-                  disabled={!canGoNext || step === totalSteps}
-                  className={cn(
-                    'pointer-events-auto w-8 h-8 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center transition-all duration-200',
-                    canGoNext && step !== totalSteps
-                      ? 'hover:bg-gray-50 hover:shadow-md hover:scale-110 text-gray-700'
-                      : 'opacity-0 cursor-not-allowed'
-                  )}
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+      {children && <div className="grid gap-3">{children}</div>}
+
+      {(onNext || onBack || secondary) && (
+        <footer className="mt-8 flex items-center justify-between gap-3">
+          <div>
+            {onBack && (
+              <Button variant="ghost" onClick={onBack}>
+                Back
+              </Button>
             )}
-
-            {/* Progress Indicator */}
-            <ProgressIndicator current={step} total={totalSteps} onStepClick={handleStepClick} />
           </div>
-        )}
-
-        {/* Header - Fixed */}
-        <div className="mb-4 text-center space-y-3 flex-shrink-0">
-          <h1 className="text-4xl font-semibold text-gray-900 animate-fade-in-up">{title}</h1>
-          {description && (
-            <p className="text-base text-gray-600 max-w-md mx-auto animate-fade-in-up delay-75">
-              {description}
-            </p>
-          )}
-        </div>
-
-        {/* Content - Scrollable */}
-        <div className="flex-1 overflow-y-auto pr-2">
-          <div className="space-y-6">{children}</div>
-        </div>
-      </div>
+          <div className="flex items-center gap-2">
+            {secondary}
+            {onNext && (
+              <Button onClick={onNext} disabled={nextDisabled || nextLoading} loading={nextLoading}>
+                {nextLabel}
+              </Button>
+            )}
+          </div>
+        </footer>
+      )}
+      {footnote && <p className="mt-3 text-right text-meta text-muted-foreground">{footnote}</p>}
     </div>
   );
 }

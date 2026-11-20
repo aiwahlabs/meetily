@@ -1,7 +1,7 @@
 import React from "react";
 import { Settings } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle, DialogTrigger, DialogFooter } from "./ui/dialog";
-import { VisuallyHidden } from "./ui/visually-hidden";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger, DialogFooter } from "./ui-legacy/dialog";
+import { VisuallyHidden } from "./ui-legacy/visually-hidden";
 import { SettingTabs } from "./SettingTabs";
 
 interface DialogProps {

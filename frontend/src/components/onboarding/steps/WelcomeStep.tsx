@@ -1,66 +1,45 @@
+'use client';
+
 import React from 'react';
-import { Lock, Sparkles, Cpu } from 'lucide-react';
+import { Mic, Captions, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+
+const BENEFITS = [
+  { icon: Mic, text: 'Detects your calls and asks before recording' },
+  { icon: Captions, text: 'Transcribes on this device, with Malayalam, Tamil and Hindi via HQ' },
+  { icon: Send, text: 'Lands in HQ Workshop with a summary and action items' },
+];
 
 export function WelcomeStep() {
   const { goNext } = useOnboarding();
 
-  const features = [
-    {
-      icon: Lock,
-      title: 'Your data never leaves your device',
-    },
-    {
-      icon: Sparkles,
-      title: 'Intelligent summaries & insights',
-    },
-    {
-      icon: Cpu,
-      title: 'Works offline, no cloud required',
-    },
-  ];
-
   return (
-    <OnboardingContainer
-      title="Welcome to Aiwah Minutes"
-      description="Record. Transcribe. Summarize. All on your device."
-      step={1}
-      hideProgress={true}
-    >
-      <div className="flex flex-col items-center space-y-10">
-        {/* Divider */}
-        <div className="w-16 h-px bg-gray-300" />
+    <div className="mx-auto flex w-full max-w-[480px] flex-col">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/logo-collapsed.png" alt="" className="mb-6 size-14 rounded-2xl" />
+      <h1 className="font-display text-3xl font-semibold tracking-tight text-foreground">Aiwah Minutes</h1>
+      <p className="mt-2 text-title text-muted-foreground">
+        Every meeting, transcribed and in HQ — without lifting a finger.
+      </p>
 
-        {/* Features Card */}
-        <div className="w-full max-w-md bg-white rounded-lg border border-gray-200 shadow-sm p-6 space-y-4">
-          {features.map((feature, index) => {
-            const Icon = feature.icon;
-            return (
-              <div key={index} className="flex items-start gap-3">
-                <div className="flex-shrink-0 mt-0.5">
-                  <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center">
-                    <Icon className="w-3 h-3 text-gray-700" />
-                  </div>
-                </div>
-                <p className="text-sm text-gray-700 leading-relaxed">{feature.title}</p>
-              </div>
-            );
-          })}
-        </div>
+      <ul className="mt-8 grid gap-4">
+        {BENEFITS.map(({ icon: Icon, text }) => (
+          <li key={text} className="flex items-start gap-3">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Icon className="size-4" aria-hidden="true" />
+            </span>
+            <span className="pt-1 text-body text-foreground">{text}</span>
+          </li>
+        ))}
+      </ul>
 
-        {/* CTA Section */}
-        <div className="w-full max-w-xs space-y-3">
-          <Button
-            onClick={goNext}
-            className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white"
-          >
-            Get Started
-          </Button>
-          <p className="text-xs text-center text-gray-500">Takes less than 3 minutes</p>
-        </div>
+      <div className="mt-10 flex items-center justify-between">
+        <span className="text-meta text-muted-foreground">Takes about 3 minutes</span>
+        <Button size="lg" onClick={goNext}>
+          Get started
+        </Button>
       </div>
-    </OnboardingContainer>
+    </div>
   );
 }

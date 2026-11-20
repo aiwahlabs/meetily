@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Mic, Speaker, RefreshCw } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui-legacy/alert';
 import { invoke } from '@tauri-apps/api/core';
 import { useIsLinux } from '@/hooks/usePlatform';
 

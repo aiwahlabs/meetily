@@ -6,16 +6,16 @@ import {
   DialogContent,
   DialogTrigger,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { VisuallyHidden } from "@/components/ui/visually-hidden"
-import { Button } from '@/components/ui/button';
-import { ButtonGroup } from '@/components/ui/button-group';
+} from "@/components/ui-legacy/dialog"
+import { VisuallyHidden } from "@/components/ui-legacy/visually-hidden"
+import { Button } from '@/components/ui-legacy/button';
+import { ButtonGroup } from '@/components/ui-legacy/button-group';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from '@/components/ui-legacy/dropdown-menu';
 import { Sparkles, Settings, Loader2, FileText, Check, Square } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { useState, useEffect, ReactNode } from 'react';

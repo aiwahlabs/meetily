@@ -1,8 +1,8 @@
 import React from "react";
 import Image from "next/image";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
-import { VisuallyHidden } from "./ui/visually-hidden";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui-legacy/dialog";
+import { VisuallyHidden } from "./ui-legacy/visually-hidden";
 import { About } from "./About";
 
 interface LogoProps {

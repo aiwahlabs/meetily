@@ -1,6 +1,6 @@
 "use client"
 
-import { Switch } from "./ui/switch"
+import { Switch } from "./ui-legacy/switch"
 import { FlaskConical, AlertCircle } from "lucide-react"
 import { useConfig } from "@/contexts/ConfigContext"
 import {

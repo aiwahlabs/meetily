@@ -1,48 +1,55 @@
-import React, { useEffect } from 'react';
-import { useOnboarding } from '@/contexts/OnboardingContext';
+'use client';
+
+import React from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { useOnboarding, STEP } from '@/contexts/OnboardingContext';
+import { StepRail } from './shared';
 import {
   WelcomeStep,
+  SignInStep,
   PermissionsStep,
   DownloadProgressStep,
-  SetupOverviewStep,
+  ConnectHqStep,
+  BackgroundStep,
+  DoneStep,
 } from './steps';
 
 interface OnboardingFlowProps {
   onComplete: () => void;
 }
 
-export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
-  const { currentStep } = useOnboarding();
-  const [isMac, setIsMac] = React.useState(false);
-
-  useEffect(() => {
-    // Check if running on macOS
-    const checkPlatform = async () => {
-      try {
-        // Dynamic import to avoid SSR issues if any
-        const { platform } = await import('@tauri-apps/plugin-os');
-        setIsMac(platform() === 'macos');
-      } catch (e) {
-        console.error('Failed to detect platform:', e);
-        // Fallback
-        setIsMac(navigator.userAgent.includes('Mac'));
-      }
-    };
-    checkPlatform();
-  }, []);
-
-  // 4-Step Onboarding Flow (System-Recommended Models):
-  // Step 1: Welcome - Introduce Meetily features
-  // Step 2: Setup Overview - Database initialization + show recommended downloads
-  // Step 3: Download Progress - Download Parakeet + Summary Model (auto-selected based on platform/RAM)
-  // Step 4: Permissions - Request mic + system audio (macOS only)
+// Persisted numbering (see STEP in OnboardingContext):
+// 1 Welcome, 2 Sign in (hard gate), 3 Permissions (macOS only), 4 Download models,
+// 5 Connect HQ, 6 Background, 7 Done.
+export function OnboardingFlow({ onComplete: _onComplete }: OnboardingFlowProps) {
+  const { currentStep, ready, hasPermissionsStep } = useOnboarding();
+  const reduce = useReducedMotion();
 
   return (
-    <div className="onboarding-flow">
-      {currentStep === 1 && <WelcomeStep />}
-      {currentStep === 2 && <SetupOverviewStep />}
-      {currentStep === 3 && <DownloadProgressStep />}
-      {currentStep === 4 && isMac && <PermissionsStep />}
+    <div className="fixed inset-0 z-50 flex overflow-hidden bg-background text-foreground">
+      <StepRail current={currentStep} hasPermissionsStep={hasPermissionsStep} />
+      <main className="flex min-w-0 flex-1 items-center justify-center overflow-y-auto px-6 py-10">
+        {ready && (
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={currentStep}
+              className="w-full"
+              initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+            >
+              {currentStep === STEP.WELCOME && <WelcomeStep />}
+              {currentStep === STEP.SIGN_IN && <SignInStep />}
+              {currentStep === STEP.PERMISSIONS && <PermissionsStep />}
+              {currentStep === STEP.DOWNLOAD && <DownloadProgressStep />}
+              {currentStep === STEP.HQ && <ConnectHqStep />}
+              {currentStep === STEP.BACKGROUND && <BackgroundStep />}
+              {currentStep === STEP.DONE && <DoneStep />}
+            </motion.div>
+          </AnimatePresence>
+        )}
+      </main>
     </div>
   );
 }

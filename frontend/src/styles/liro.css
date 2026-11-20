@@ -1,0 +1,351 @@
+/* ==========================================================================
+   Liro theme — shadcn/ui token format
+
+   Import once, after Tailwind:
+
+     @import "tailwindcss";
+     @import "./liro.css";
+
+   Import it from that CSS file, not from JavaScript (main.tsx, layout.tsx):
+   Tailwind has to process it. A build warning such as "Unknown at rule:
+   @theme" or "@custom-variant" means it was not, and the theme is missing.
+
+   Every Liro component reads its colours from these variables, so this file
+   is the whole theme. It uses the shadcn/ui names (background, card,
+   foreground, muted, primary, border, ring, destructive…), so an existing
+   shadcn project can keep its own globals.css and the components follow it.
+   Liro adds three status colours shadcn does not define — success, warning,
+   info — plus a type scale, motion and layering tokens.
+
+   The values are the Liro look: soft neutrals (an off-white page, charcoal
+   rather than black in dark mode), Geist, hairline borders
+   drawn as translucent ink so they sit on any surface, red for danger only.
+   Every status colour clears 4.5:1 as text on the card and on its own 12%
+   tint, in both themes. In dark mode the status colours are light, so a
+   solid destructive button uses `dark:bg-destructive/60` to keep white text
+   legible — the same trick shadcn/ui uses.
+
+   Dark mode is class-based. `.dark` on any element themes its subtree, and
+   `.light` inside a dark page switches one region back — that is how a docs
+   page shows a light and a dark preview side by side.
+   ========================================================================== */
+
+@custom-variant dark (&:is(.dark *));
+
+:root,
+.light {
+  --radius: 0.625rem;
+
+  --background: oklch(0.991 0 0);
+  --foreground: oklch(0.163 0 0);
+  --card: oklch(0.991 0 0);
+  --card-foreground: oklch(0.163 0 0);
+  --popover: oklch(0.991 0 0);
+  --popover-foreground: oklch(0.163 0 0);
+
+  --primary: oklch(0.163 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.966 0 0);
+  --secondary-foreground: oklch(0.163 0 0);
+  --muted: oklch(0.966 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  /* A step between foreground and muted: secondary text that should still
+     read first among the greys (a summary, a field label). 9:1 on card. */
+  --muted-foreground-2: oklch(0.4 0 0);
+  /* Strings in code and JSON, so values stand apart from keys. 5:1 on card. */
+  --syntax-string: oklch(0.49 0.11 165);
+  /* A resting card's edge, under its hairline: barely there, it only lifts
+     the card off a same-coloured page. Not for anything that floats. */
+  --shadow-rest: 0 1px 1px -0.5px oklch(0 0 0 / 0.06), 0 1px 3px oklch(0 0 0 / 0.035);
+  --accent: oklch(0.966 0 0);
+  --accent-foreground: oklch(0.163 0 0);
+
+  /* Hairlines are translucent ink, not a grey: they read the same on a card,
+     on a muted row and on a tinted status panel. */
+  --border: oklch(0 0 0 / 0.09);
+  --input: oklch(0 0 0 / 0.15);
+  --ring: oklch(0.163 0 0 / 0.5);
+
+  /* Status hues: clear mid tones for text and icons, each with a soft
+     pastel of its own for chips and panels (--*-soft). A pastel is not the
+     hue at 10% opacity: over a grey card that turns muddy, so it is mixed
+     separately. Text on its own soft passes 4.5:1. */
+  --destructive: oklch(0.55 0.2 24);
+  --destructive-foreground: oklch(0.985 0 0);
+  --destructive-soft: oklch(0.955 0.03 18);
+  --success: oklch(0.5 0.13 150);
+  --success-foreground: oklch(0.985 0 0);
+  --success-soft: oklch(0.963 0.032 152);
+  --warning: oklch(0.53 0.145 52);
+  --warning-fill: oklch(0.79 0.16 75);
+  --warning-foreground: oklch(0.205 0 0);
+  --warning-soft: oklch(0.962 0.042 78);
+  --info: oklch(0.53 0.2 264);
+  --info-foreground: oklch(0.985 0 0);
+  --info-soft: oklch(0.956 0.027 262);
+
+  /* Chart series, in fixed order — never cycled: one blue in steps, the
+     same family Breakdown Chart uses, deepest for the first series. The
+     lighter slots sit under 3:1, so charts always carry a legend, a tooltip
+     and a data table. Want another colour? Set --chart-1 … --chart-5 on a
+     parent. */
+  --chart-1: var(--info);
+  --chart-2: color-mix(in oklab, var(--info) 72%, var(--card));
+  --chart-3: color-mix(in oklab, var(--info) 50%, var(--card));
+  --chart-4: color-mix(in oklab, var(--info) 34%, var(--card));
+  --chart-5: color-mix(in oklab, var(--info) 22%, var(--card));
+
+  color-scheme: light;
+}
+
+.dark {
+  --background: oklch(0.195 0 0);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.223 0 0);
+  --card-foreground: oklch(0.96 0 0);
+  --popover: oklch(0.223 0 0);
+  --popover-foreground: oklch(0.96 0 0);
+
+  --primary: oklch(0.96 0 0);
+  --primary-foreground: oklch(0.163 0 0);
+  --secondary: oklch(0.27 0 0);
+  --secondary-foreground: oklch(0.96 0 0);
+  --muted: oklch(0.27 0 0);
+  --muted-foreground: oklch(0.68 0 0);
+  --muted-foreground-2: oklch(0.8 0 0);
+  --syntax-string: oklch(0.78 0.12 165);
+  --shadow-rest: 0 0 transparent;
+  --accent: oklch(0.27 0 0);
+  --accent-foreground: oklch(0.96 0 0);
+
+  --border: oklch(1 0 0 / 0.1);
+  --input: oklch(1 0 0 / 0.16);
+  --ring: oklch(1 0 0 / 0.3);
+
+  --destructive: oklch(0.67 0.19 23);
+  --destructive-foreground: oklch(0.985 0 0);
+  --destructive-soft: color-mix(in oklab, var(--destructive) 16%, var(--card));
+  --success: oklch(0.78 0.15 155);
+  --success-foreground: oklch(0.205 0 0);
+  --success-soft: color-mix(in oklab, var(--success) 14%, var(--card));
+  --warning: oklch(0.82 0.15 75);
+  --warning-fill: oklch(0.79 0.16 75);
+  --warning-foreground: oklch(0.205 0 0);
+  --warning-soft: color-mix(in oklab, var(--warning) 14%, var(--card));
+  --info: oklch(0.73 0.15 258);
+  --info-foreground: oklch(0.205 0 0);
+  --info-soft: color-mix(in oklab, var(--info) 16%, var(--card));
+
+  /* Chart series, in fixed order — never cycled: one blue in steps, the
+     same family Breakdown Chart uses, deepest for the first series. The
+     lighter slots sit under 3:1, so charts always carry a legend, a tooltip
+     and a data table. Want another colour? Set --chart-1 … --chart-5 on a
+     parent. */
+  --chart-1: var(--info);
+  --chart-2: color-mix(in oklab, var(--info) 74%, var(--card));
+  --chart-3: color-mix(in oklab, var(--info) 54%, var(--card));
+  --chart-4: color-mix(in oklab, var(--info) 40%, var(--card));
+  --chart-5: color-mix(in oklab, var(--info) 28%, var(--card));
+
+  color-scheme: dark;
+}
+
+@theme {
+  /* The components read the theme font; Liro sets Geist (load it, or your
+     own font, in your app — the stack falls back to the system face). */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted-foreground-2: var(--muted-foreground-2);
+  --color-syntax-string: var(--syntax-string);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-fill: var(--warning-fill);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-soft: var(--info-soft);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Radius — shadcn steps, plus the Liro surface steps by name. */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-surface: 18px;
+  --radius-panel: 14px;
+  --radius-row: 12px;
+  --radius-control: 10px;
+  --radius-chip: 8px;
+
+  /* Type — product surfaces, not reading surfaces. Mirrors TYPE in tokens.ts. */
+  --text-figure: 27px;
+  --text-title: 15px;
+  --text-body: 13.5px;
+  --text-sub: 13px;
+  --text-dense: 12.5px;
+  --text-meta: 11.5px;
+  --text-chip: 11px;
+  --text-micro: 10.5px;
+
+  /* Elevation. Shadows are for things that float; resting surfaces use a
+     hairline ring instead. */
+  --shadow-float: 0 1px 2px oklch(0 0 0 / 0.06), 0 8px 24px oklch(0 0 0 / 0.1);
+  --shadow-overlay: 0 2px 6px oklch(0 0 0 / 0.08), 0 24px 64px oklch(0 0 0 / 0.18);
+
+  /* Motion. Mirrors DURATION in tokens.ts; springs live in JS. */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 260ms;
+}
+
+/* Accent roles that would otherwise borrow a status colour. Each falls back
+   to the status colour it used before, so the look is unchanged; set them to
+   your brand colour to keep a one-accent theme without recolouring every
+   success, warning and info message.
+     --status-live    AI Chat's "Ready" dot          (default: success)
+     --status-busy    AI Chat's "Thinking" dot       (default: warning-fill)
+     --status-unread  Conversation History's unread  (default: info)
+     --glow-1/2/3     Chat Empty State's glow        (default: info, success, warning) */
+:root {
+  --status-live: var(--success);
+  --status-busy: var(--warning-fill);
+  --status-unread: var(--info);
+  --glow-1: var(--info);
+  --glow-2: var(--success);
+  --glow-3: var(--warning);
+}
+
+/* Layering. Mirrors LAYER in tokens.ts — popovers under dialogs under toasts. */
+:root {
+  --z-popover: 60;
+  --z-dialog: 70;
+  --z-toast: 80;
+}
+
+/* Enter and exit. Radix stamps data-state="open" / "closed" on overlays and
+   holds them in the DOM until the exit animation ends, so these are the whole
+   of the motion for menus, popovers, tooltips, dialogs and toasts. The
+   components apply them behind `motion-safe:`, so reduced motion gets none. */
+@theme {
+  --animate-fade-in: liro-fade-in 180ms var(--ease-out-soft);
+  --animate-fade-out: liro-fade-out 120ms ease-in;
+  --animate-pop-in: liro-pop-in 160ms var(--ease-out-soft);
+  --animate-pop-out: liro-pop-out 110ms ease-in;
+  --animate-dialog-in: liro-dialog-in 220ms var(--ease-out-soft);
+  --animate-dialog-out: liro-dialog-out 140ms ease-in;
+  --animate-toast-in: liro-toast-in 260ms var(--ease-out-soft);
+  --animate-toast-out: liro-toast-out 160ms ease-in;
+
+  @keyframes liro-fade-in { from { opacity: 0; } }
+  /* A new page of rows, or a new set of points: a soft blur that settles. */
+  @keyframes liro-blur-in { from { opacity: 0; filter: blur(4px); transform: translateY(3px); } }
+  @keyframes liro-fade-out { to { opacity: 0; } }
+  @keyframes liro-pop-in { from { opacity: 0; transform: scale(0.96) translateY(var(--pop-y, -4px)); } }
+  /* A chart point growing in under the pointer. */
+  @keyframes liro-dot-in { from { opacity: 0; transform: scale(0.3); } }
+  @keyframes liro-pop-out { to { opacity: 0; transform: scale(0.97); } }
+  @keyframes liro-dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+  @keyframes liro-dialog-out { to { opacity: 0; transform: translateY(4px) scale(0.98); } }
+  @keyframes liro-toast-in { from { opacity: 0; transform: translateY(12px) scale(0.98); } }
+  @keyframes liro-toast-out { to { opacity: 0; transform: translateX(var(--radix-toast-swipe-end-x, 24px)); } }
+}
+
+/* Height and slide, for Accordion / Collapsible and Drawer. */
+@theme {
+  /* Open and close share one duration and curve: in a single-open set one
+     section closes while the next opens, and matched timing keeps the total
+     height moving one way instead of swelling and then shrinking back. */
+  --animate-accordion-down: liro-accordion-down 220ms var(--ease-out-soft);
+  --animate-accordion-up: liro-accordion-up 220ms var(--ease-out-soft);
+  --animate-sheet-in-right: liro-sheet-in-right 260ms var(--ease-out-soft);
+  --animate-sheet-out-right: liro-sheet-out-right 180ms ease-in;
+  --animate-sheet-in-left: liro-sheet-in-left 260ms var(--ease-out-soft);
+  --animate-sheet-out-left: liro-sheet-out-left 180ms ease-in;
+  --animate-sheet-in-bottom: liro-sheet-in-bottom 280ms var(--ease-out-soft);
+  --animate-sheet-out-bottom: liro-sheet-out-bottom 180ms ease-in;
+  --animate-skeleton: liro-skeleton 1.6s ease-in-out infinite;
+
+  @keyframes liro-accordion-down { from { height: 0; } to { height: var(--radix-accordion-content-height); } }
+  @keyframes liro-accordion-up { from { height: var(--radix-accordion-content-height); } to { height: 0; } }
+  @keyframes liro-sheet-in-right { from { transform: translateX(100%); } }
+  @keyframes liro-sheet-out-right { to { transform: translateX(100%); } }
+  @keyframes liro-sheet-in-left { from { transform: translateX(-100%); } }
+  @keyframes liro-sheet-out-left { to { transform: translateX(-100%); } }
+  @keyframes liro-sheet-in-bottom { from { transform: translateY(100%); } }
+  @keyframes liro-sheet-out-bottom { to { transform: translateY(100%); } }
+  @keyframes liro-skeleton { 50% { opacity: 0.55; } }
+}
+
+/* AI surfaces. Four small motions shared by every chat and agent component:
+   a sheen that sweeps across "Thinking…", the caret at the end of a streaming
+   answer, the fade each new word arrives with, and the three waiting dots.
+   All are applied behind `motion-safe:`. */
+@theme {
+  --animate-shimmer: liro-shimmer 2.2s linear infinite;
+  --animate-caret: liro-caret 1.05s steps(1, end) infinite;
+  --animate-word-in: liro-word-in 380ms var(--ease-out-soft) both;
+  --animate-dot: liro-dot 1.25s ease-in-out infinite;
+
+  @keyframes liro-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  @keyframes liro-caret { 50% { opacity: 0; } }
+  @keyframes liro-word-in { from { opacity: 0; filter: blur(3px); } }
+  @keyframes liro-dot { 0%, 60%, 100% { transform: translateY(0); opacity: 0.35; } 30% { transform: translateY(-3px); opacity: 1; } }
+}
+
+/* Earlier animation names, kept so code written against an earlier version
+   of this theme (layro-fade-in, layro-dot-in, …) keeps animating. */
+@layer base {
+  @keyframes layro-accordion-down { from { height: 0; } to { height: var(--radix-accordion-content-height); } }
+  @keyframes layro-accordion-up { from { height: var(--radix-accordion-content-height); } to { height: 0; } }
+  @keyframes layro-blur-in { from { opacity: 0; filter: blur(4px); transform: translateY(3px); } }
+  @keyframes layro-caret { 50% { opacity: 0; } }
+  @keyframes layro-dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+  @keyframes layro-dialog-out { to { opacity: 0; transform: translateY(4px) scale(0.98); } }
+  @keyframes layro-dot { 0%, 60%, 100% { transform: translateY(0); opacity: 0.35; } 30% { transform: translateY(-3px); opacity: 1; } }
+  @keyframes layro-dot-in { from { opacity: 0; transform: scale(0.3); } }
+  @keyframes layro-fade-in { from { opacity: 0; } }
+  @keyframes layro-fade-out { to { opacity: 0; } }
+  @keyframes layro-pop-in { from { opacity: 0; transform: scale(0.96) translateY(var(--pop-y, -4px)); } }
+  @keyframes layro-pop-out { to { opacity: 0; transform: scale(0.97); } }
+  @keyframes layro-sheet-in-bottom { from { transform: translateY(100%); } }
+  @keyframes layro-sheet-in-left { from { transform: translateX(-100%); } }
+  @keyframes layro-sheet-in-right { from { transform: translateX(100%); } }
+  @keyframes layro-sheet-out-bottom { to { transform: translateY(100%); } }
+  @keyframes layro-sheet-out-left { to { transform: translateX(-100%); } }
+  @keyframes layro-sheet-out-right { to { transform: translateX(100%); } }
+  @keyframes layro-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  @keyframes layro-skeleton { 50% { opacity: 0.55; } }
+  @keyframes layro-toast-in { from { opacity: 0; transform: translateY(12px) scale(0.98); } }
+  @keyframes layro-toast-out { to { opacity: 0; transform: translateX(var(--radix-toast-swipe-end-x, 24px)); } }
+  @keyframes layro-word-in { from { opacity: 0; filter: blur(3px); } }
+}

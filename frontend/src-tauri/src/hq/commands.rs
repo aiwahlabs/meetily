@@ -1,7 +1,7 @@
 //! AIWAH: Tauri commands for HQ Workshop sync (Settings → HQ, meeting badges).
 
 use super::{
-    enqueue, fetch_identity, get_sync_records, load_settings, process_meeting, process_pending, save_settings,
+    enqueue, fetch_identity, get_sync_records, list_targets, HqTarget, load_settings, process_meeting, process_pending, save_settings,
     HqIdentity, HqSettings, SyncRecord,
 };
 use crate::state::AppState;
@@ -111,6 +111,13 @@ pub async fn hq_test_connection(state: tauri::State<'_, AppState>) -> Result<HqI
     fetch_identity(&settings).await
 }
 
+/// Projects and leads the user can tag a meeting with (for the per-meeting picker).
+#[tauri::command]
+pub async fn hq_list_targets(state: tauri::State<'_, AppState>) -> Result<Vec<HqTarget>, String> {
+    let settings = load_settings(state.db_manager.pool()).await?;
+    list_targets(&settings).await
+}
+
 #[tauri::command]
 pub async fn hq_get_sync_status(
     state: tauri::State<'_, AppState>,
@@ -128,6 +135,7 @@ pub async fn hq_sync_meeting<R: Runtime>(
     meeting_id: String,
     language: Option<String>,
     project_id: Option<String>,
+    lead_id: Option<String>,
     force: Option<bool>,
 ) -> Result<String, String> {
     let pool = state.db_manager.pool().clone();
@@ -135,7 +143,7 @@ pub async fn hq_sync_meeting<R: Runtime>(
     if !settings.is_configured() {
         return Err("Connect HQ first: add your API key in Settings → HQ".to_string());
     }
-    enqueue(&pool, &meeting_id, language, project_id, force.unwrap_or(false)).await?;
+    enqueue(&pool, &meeting_id, language, project_id, lead_id, force.unwrap_or(false)).await?;
     process_meeting(&app, &pool, &meeting_id).await
 }
 

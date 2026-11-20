@@ -1,6 +1,6 @@
 import React, { useContext, useState, useEffect } from 'react';
-import { Switch } from '@/components/ui/switch';
-import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui-legacy/switch';
+import { Button } from '@/components/ui-legacy/button';
 import { Info, Loader2, Copy, Check } from 'lucide-react';
 import { AnalyticsContext } from './AnalyticsProvider';
 import { load } from '@tauri-apps/plugin-store';

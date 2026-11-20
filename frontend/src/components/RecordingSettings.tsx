@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Switch } from '@/components/ui/switch';
+import { Switch } from '@/components/ui-legacy/switch';
 import { FolderOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';

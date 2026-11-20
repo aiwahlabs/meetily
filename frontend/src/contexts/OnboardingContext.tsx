@@ -6,6 +6,25 @@ import { listen } from '@tauri-apps/api/event';
 import type { PermissionStatus, OnboardingPermissions } from '@/types/onboarding';
 import { resolveOnboardingSummaryModelStatus } from '@/lib/onboarding-summary-model';
 import type { ParakeetDownloadProgressEvent } from '@/lib/parakeet';
+import { account, type AccountStatus } from '@/lib/aiwah/api';
+
+// Persisted step numbers (u8 in the Rust status file). Never renumber without bumping STATUS_VERSION.
+export const STEP = {
+  WELCOME: 1,
+  SIGN_IN: 2,
+  PERMISSIONS: 3,
+  DOWNLOAD: 4,
+  HQ: 5,
+  BACKGROUND: 6,
+  DONE: 7,
+} as const;
+export const LAST_STEP = STEP.DONE;
+// Status files written by the old 4-step flow have a different version; they restart at Welcome.
+const STATUS_VERSION = '2.0';
+
+export function isAccountOk(s: AccountStatus | null | undefined): boolean {
+  return !!s && s.signedIn && s.domainOk;
+}
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
@@ -37,6 +56,15 @@ interface ParakeetProgressInfo {
 
 interface OnboardingContextType {
   currentStep: number;
+  /** False until the saved step and the Google account have been checked. */
+  ready: boolean;
+  /** True when a signed-in @aiwahlabs.com account exists. Gates every step after sign-in. */
+  accountOk: boolean;
+  accountStatus: AccountStatus | null;
+  /** The permissions step only exists on macOS; other platforms skip it. */
+  hasPermissionsStep: boolean;
+  /** Call after account.signIn() succeeds so the gate opens. */
+  setAccountStatus: (s: AccountStatus) => void;
   parakeetDownloaded: boolean;
   parakeetProgress: number;
   parakeetProgressInfo: ParakeetProgressInfo;
@@ -75,7 +103,16 @@ interface StartBackgroundDownloadsOptions {
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
 
 export function OnboardingProvider({ children }: { children: React.ReactNode }) {
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState<number>(STEP.WELCOME);
+  const [ready, setReady] = useState(false);
+  const [accountStatus, setAccountStatusState] = useState<AccountStatus | null>(null);
+  const [hasPermissionsStep, setHasPermissionsStep] = useState(false);
+  const accountOk = isAccountOk(accountStatus);
+  // Ref mirror so async download code always sees the latest gate value.
+  const accountOkRef = useRef(false);
+  accountOkRef.current = accountOk;
+  const hasPermissionsStepRef = useRef(false);
+  hasPermissionsStepRef.current = hasPermissionsStep;
   const [completed, setCompleted] = useState(false);
   const [parakeetDownloaded, setParakeetDownloaded] = useState(false);
   const [parakeetProgress, setParakeetProgress] = useState(0);
@@ -137,6 +174,10 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   };
 
   const requestSummaryModelDownload = (modelName: string) => {
+    if (!accountOkRef.current) {
+      console.warn('[OnboardingContext] Summary download blocked: not signed in');
+      return;
+    }
     console.log('[OnboardingContext] Starting Summary Model download');
     invoke('builtin_ai_download_model', { modelName })
       .catch(err => {
@@ -149,6 +190,14 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 
   // Load status on mount and initialize database
   useEffect(() => {
+    (async () => {
+      try {
+        const { platform } = await import('@tauri-apps/plugin-os');
+        setHasPermissionsStep(platform() === 'macos');
+      } catch {
+        setHasPermissionsStep(navigator.userAgent.includes('Mac'));
+      }
+    })();
     loadOnboardingStatus();
     checkDatabaseStatus();
     initializeDatabaseInBackground();
@@ -222,7 +271,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 
     // Don't auto-save if completed (to avoid overwriting completion status)
     // Also don't auto-save if we are currently in the process of completing
-    if (completed || isCompletingRef.current) return;
+    if (completed || isCompletingRef.current || !ready) return;
 
     saveTimeoutRef.current = setTimeout(() => {
       saveOnboardingStatus();
@@ -231,7 +280,12 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [currentStep, parakeetDownloaded, summaryModelDownloaded, completed]);
+  }, [currentStep, parakeetDownloaded, summaryModelDownloaded, completed, ready]);
+
+  // If the account disappears mid-flow, fall back to the sign-in step.
+  useEffect(() => {
+    if (ready && !accountOk && currentStep > STEP.SIGN_IN) setCurrentStep(STEP.SIGN_IN);
+  }, [ready, accountOk, currentStep]);
 
   // Listen to Parakeet download progress
   useEffect(() => {
@@ -341,6 +395,24 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 
   const loadOnboardingStatus = async () => {
     try {
+      await loadOnboardingStatusInner();
+    } finally {
+      setReady(true);
+    }
+  };
+
+  const loadOnboardingStatusInner = async () => {
+    // Check the Google account first: it decides how far a restart may resume.
+    let acct: AccountStatus | null = null;
+    try {
+      acct = await account.status();
+      setAccountStatusState(acct);
+      accountOkRef.current = isAccountOk(acct);
+    } catch (error) {
+      console.warn('[OnboardingContext] account_status failed:', error);
+    }
+
+    try {
       const status = await invoke<OnboardingStatus | null>('get_onboarding_status');
       if (status) {
         console.log('[OnboardingContext] Loaded saved status:', status);
@@ -360,7 +432,13 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         // Don't trust saved status - verify actual model status on disk
         const verifiedStatus = await verifyModelStatus(status);
 
-        setCurrentStep(verifiedStatus.currentStep);
+        // Legacy (pre-sign-in) numbering: restart at Welcome. Never resume past sign-in without it.
+        let resumeStep = status.version === STATUS_VERSION ? verifiedStatus.currentStep : STEP.WELCOME;
+        if (resumeStep > STEP.SIGN_IN && !isAccountOk(acct)) resumeStep = STEP.SIGN_IN;
+        if (resumeStep === STEP.PERMISSIONS && !hasPermissionsStepRef.current) resumeStep = STEP.DOWNLOAD;
+        // The Done step is only reached through the flow; resume one step earlier.
+        if (resumeStep >= STEP.DONE) resumeStep = STEP.BACKGROUND;
+        setCurrentStep(resumeStep);
         setCompleted(verifiedStatus.completed);
         setParakeetDownloaded(verifiedStatus.parakeetDownloaded);
         setSummaryModelDownloaded(verifiedStatus.summaryModelDownloaded);
@@ -419,15 +497,8 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       summaryModelDownloaded = false;
     }
 
-    // Determine the correct step based on verified status
-    // New simplified flow: Step 1: Welcome, Step 2: Setup Overview, Step 3: Download Progress, Step 4: Permissions (macOS)
-    let currentStep = savedStatus.current_step;
+    let currentStep = Math.max(1, Math.min(savedStatus.current_step, LAST_STEP));
     let completed = savedStatus.completed;
-
-    // Clamp step to new max (4)
-    if (currentStep > 4) {
-      currentStep = 3; // Go to download progress step
-    }
 
     // Trust the completed status - don't revert based on model downloads
     // Downloads continue in background; user stays in main app regardless
@@ -452,7 +523,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     try {
       await invoke('save_onboarding_status_cmd', {
         status: {
-          version: '1.0',
+          version: STATUS_VERSION,
           completed: completed,
           current_step: currentStep,
           model_status: {
@@ -523,6 +594,12 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     });
 
     try {
+      if (!accountOkRef.current) {
+        // Hard gate: nothing is downloaded before the user signs in with their company account.
+        console.warn('[OnboardingContext] Downloads blocked: sign in required');
+        throw new Error('Sign in with your Aiwah Labs account before downloading models.');
+      }
+
       const shouldStartParakeet = includeParakeet && !parakeetDownloaded;
       const shouldStartSummary = includeSummary && !summaryModelDownloaded && !!summaryModel;
 
@@ -572,6 +649,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   };
 
   const retryParakeetDownload = async () => {
+    if (!accountOkRef.current) throw new Error('Sign in required');
     console.log('[OnboardingContext] Retrying Parakeet download');
     try {
       await invoke('parakeet_retry_download', { modelName: PARAKEET_MODEL });
@@ -588,30 +666,42 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }));
   }, []);
 
-  const goToStep = useCallback((step: number) => {
-    setCurrentStep(Math.max(1, Math.min(step, 4)));
+  const setAccountStatus = useCallback((s: AccountStatus) => {
+    accountOkRef.current = isAccountOk(s);
+    setAccountStatusState(s);
   }, []);
+
+  // Clamp a target step: never past sign-in without a valid account, skip permissions off macOS.
+  const resolveStep = useCallback((target: number, direction: 1 | -1 = 1) => {
+    let step = Math.max(STEP.WELCOME, Math.min(target, LAST_STEP));
+    if (step === STEP.PERMISSIONS && !hasPermissionsStepRef.current) {
+      step += direction;
+    }
+    if (step > STEP.SIGN_IN && !accountOkRef.current) step = STEP.SIGN_IN;
+    return Math.max(STEP.WELCOME, Math.min(step, LAST_STEP));
+  }, []);
+
+  const goToStep = useCallback((step: number) => {
+    setCurrentStep((prev: number) => resolveStep(step, step >= prev ? 1 : -1));
+  }, [resolveStep]);
 
   const goNext = useCallback(() => {
-    setCurrentStep((prev: number) => {
-      const next = prev + 1;
-      // Don't go past step 4
-      return Math.min(next, 4);
-    });
-  }, []);
+    setCurrentStep((prev: number) => resolveStep(prev + 1, 1));
+  }, [resolveStep]);
 
   const goPrevious = useCallback(() => {
-    setCurrentStep((prev: number) => {
-      const previous = prev - 1;
-      // Don't go below step 1
-      return Math.max(previous, 1);
-    });
-  }, []);
+    setCurrentStep((prev: number) => resolveStep(prev - 1, -1));
+  }, [resolveStep]);
 
   return (
     <OnboardingContext.Provider
       value={{
         currentStep,
+        ready,
+        accountOk,
+        accountStatus,
+        hasPermissionsStep,
+        setAccountStatus,
         parakeetDownloaded,
         parakeetProgress,
         parakeetProgressInfo,

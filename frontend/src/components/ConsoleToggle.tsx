@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
+import { Button } from '@/components/ui-legacy/button';
+import { Label } from '@/components/ui-legacy/label';
+import { Switch } from '@/components/ui-legacy/switch';
 
 export function ConsoleToggle() {
   const [isLoading, setIsLoading] = useState(false);

@@ -14,6 +14,37 @@ interface SidebarItem {
   title: string;
   type: 'folder' | 'file';
   children?: SidebarItem[];
+  badge?: string; // AIWAH: meeting type
+}
+
+// AIWAH: per-platform meeting folders (platform comes from the call watcher, see
+// src-tauri/src/autorec/meta.rs). Meetings without metadata go to "Other recordings".
+const AIWAH_PLATFORMS: [string, string][] = [
+  ['google_meet', 'Google Meet'],
+  ['slack', 'Slack'],
+  ['whatsapp', 'WhatsApp'],
+  ['zoom', 'Zoom'],
+  ['teams', 'Microsoft Teams'],
+  ['other', 'Other recordings'],
+];
+export const AIWAH_FOLDER_IDS = AIWAH_PLATFORMS.map(([p]) => `aiwah-folder-${p}`);
+const AIWAH_TYPE_BADGE: Record<string, string> = {
+  hiring: 'Hiring', discovery: 'Discovery', demo: 'Demo', client: 'Client', internal: 'Internal',
+};
+interface AiwahMeetingMeta { meetingId: string; platform: string; meetingType: string }
+
+function aiwahGroupMeetings(meetings: { id: string; title: string }[], meta: Record<string, AiwahMeetingMeta>): SidebarItem[] {
+  const file = (m: { id: string; title: string }): SidebarItem => ({
+    id: m.id, title: m.title, type: 'file', badge: AIWAH_TYPE_BADGE[meta[m.id]?.meetingType ?? ''],
+  });
+  const groups = AIWAH_PLATFORMS.map(([p, label]) => ({
+    p, label, items: meetings.filter((m) => (AIWAH_PLATFORMS.some(([k]) => k === meta[m.id]?.platform) ? meta[m.id].platform : 'other') === p),
+  })).filter((g) => g.items.length > 0);
+  // One group only (e.g. nothing detected yet): keep the flat list.
+  if (groups.length <= 1) return meetings.map(file);
+  return groups.map((g) => ({
+    id: `aiwah-folder-${g.p}`, title: `${g.label} (${g.items.length})`, type: 'folder', children: g.items.map(file),
+  }));
 }
 
 export interface CurrentMeeting {
@@ -79,10 +110,15 @@ export const useSidebar = () => {
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ New Call' });
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  // AIWAH: remember the rail/expanded choice
+  useEffect(() => {
+    try { if (localStorage.getItem('aiwah-sidebar-collapsed') === '1') setIsCollapsed(true); } catch { /* ignore */ }
+  }, []);
   const [doodlePath, setDoodlePath] = useState<string | null>(null);
   const [doodleDate, setDoodleDate] = useState<string | null>(null);
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
+  const [aiwahMeta, setAiwahMeta] = useState<Record<string, AiwahMeetingMeta>>({}); // AIWAH
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -120,6 +156,13 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
           title: meeting.title
         }));
         setMeetings(transformedMeetings);
+        // AIWAH: platform folder + meeting type per meeting
+        try {
+          const metaRows = await invoke<AiwahMeetingMeta[]>('autorec_list_meeting_meta');
+          setAiwahMeta(Object.fromEntries(metaRows.map((r) => [r.meetingId, r])));
+        } catch (e) {
+          console.warn('Could not load meeting folders:', e);
+        }
         Analytics.trackBackendConnection(true);
       } catch (error) {
         console.error('Error fetching meetings:', error);
@@ -147,14 +190,16 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       title: 'Meeting Notes',
       type: 'folder' as const,
       children: [
-        ...meetings.map(meeting => ({ id: meeting.id, title: meeting.title, type: 'file' as const }))
+        ...aiwahGroupMeetings(meetings, aiwahMeta) // AIWAH: per-platform folders
       ]
     },
   ];
 
 
   const toggleCollapse = () => {
-    setIsCollapsed(!isCollapsed);
+    const next = !isCollapsed;
+    setIsCollapsed(next);
+    try { localStorage.setItem('aiwah-sidebar-collapsed', next ? '1' : '0'); } catch { /* ignore */ }
   };
 
   // Update current meeting when on home page
@@ -168,7 +213,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   // Update sidebar items when meetings change
   useEffect(() => {
     setSidebarItems(baseItems);
-  }, [meetings]);
+  }, [meetings, aiwahMeta]); // AIWAH: also regroup when folders change
 
   // Function to handle recording toggle from sidebar
   const handleRecordingToggle = () => {

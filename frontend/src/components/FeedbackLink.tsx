@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { MessagesSquare } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui-legacy/tooltip';
 
 export default function FeedbackLink({ isCollapsed }: { isCollapsed: boolean }) {
   const pathname = usePathname();

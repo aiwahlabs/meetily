@@ -4,8 +4,8 @@ import {
   FormItem,
   FormLabel,
   FormDescription,
-} from '@/components/ui/form';
-import { Switch } from '@/components/ui/switch';
+} from '@/components/ui-legacy/form';
+import { Switch } from '@/components/ui-legacy/switch';
 import { Control } from 'react-hook-form'; // Import Control type
 
 type IInpuItemProps = {

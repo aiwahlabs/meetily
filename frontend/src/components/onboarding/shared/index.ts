@@ -1,3 +1,2 @@
-export { ProgressIndicator } from './ProgressIndicator';
+export { StepRail } from './StepRail';
 export { PermissionRow } from './PermissionRow';
-export { StatusIndicator } from './StatusIndicator';

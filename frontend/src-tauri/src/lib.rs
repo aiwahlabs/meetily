@@ -50,6 +50,7 @@ pub mod openai;
 pub mod anthropic;
 pub mod groq;
 pub mod hq; // AIWAH: HQ Workshop sync
+pub mod autorec; // AIWAH: call detection, calendar, auto-record
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
@@ -574,6 +575,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // AIWAH: opt-in "start at login" (Settings → Auto-record); starts hidden in the tray.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
@@ -629,6 +635,16 @@ pub fn run() {
 
             // AIWAH: retry loop that pushes queued meetings to HQ Workshop
             hq::start_background_sync(_app.handle());
+
+            // AIWAH: floating record button + call/calendar watcher (auto-record)
+            autorec::watcher::create_floating_window(_app.handle());
+            // AIWAH: the main window starts hidden (tauri.conf.json) so a login start stays in the tray.
+            if !std::env::args().any(|a| a == "--minimized") {
+                if let Some(w) = _app.get_webview_window("main") {
+                    let _ = w.show();
+                }
+            }
+            autorec::watcher::start(_app.handle());
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
@@ -860,6 +876,26 @@ pub fn run() {
             hq::commands::hq_get_settings,
             hq::commands::hq_save_settings,
             hq::commands::hq_test_connection,
+            hq::commands::hq_list_targets,
+            autorec::commands::autorec_get_floating_state,
+            autorec::commands::autorec_floating_action,
+            autorec::commands::autorec_floating_resize,
+            autorec::commands::autorec_get_settings,
+            autorec::commands::autorec_save_settings,
+            autorec::commands::autorec_list_meeting_meta,
+            autorec::commands::autorec_update_meeting_meta,
+            autorec::commands::autorec_meeting_types,
+            autorec::commands::autorec_detect_now,
+            autorec::commands::autorec_refresh_calendar,
+            autorec::commands::aiwah_open_url,
+            autorec::calendar::commands::account_status,
+            autorec::calendar::commands::account_sign_in,
+            autorec::calendar::commands::account_sign_out,
+            autorec::calendar::commands::calendar_get_status,
+            autorec::calendar::commands::calendar_save_client,
+            autorec::calendar::commands::calendar_connect,
+            autorec::calendar::commands::calendar_disconnect,
+            autorec::calendar::commands::calendar_list_events,
             hq::commands::hq_get_sync_status,
             hq::commands::hq_sync_meeting,
             hq::commands::hq_sync_pending,

@@ -58,6 +58,14 @@ export function useRecordingStart(
 
   // Generate meeting title with timestamp
   const generateMeetingTitle = useCallback(() => {
+    // AIWAH: auto-record / the floating prompt pass the calendar event or call title.
+    try {
+      const aiwahTitle = sessionStorage.getItem('aiwahMeetingTitle');
+      if (aiwahTitle) {
+        sessionStorage.removeItem('aiwahMeetingTitle');
+        return aiwahTitle;
+      }
+    } catch { /* sessionStorage unavailable */ }
     const now = new Date();
     const day = String(now.getDate()).padStart(2, '0');
     const month = String(now.getMonth() + 1).padStart(2, '0');

@@ -423,6 +423,7 @@ pub async fn whisper_download_model(
     app_handle: tauri::AppHandle,
     model_name: String,
 ) -> Result<(), String> {
+    crate::autorec::require_signed_in(&app_handle).await?; // AIWAH: models only after company sign-in
     let engine = {
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()

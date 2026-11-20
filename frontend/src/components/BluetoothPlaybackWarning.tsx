@@ -1,9 +1,9 @@
 "use client";
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui-legacy/alert';
 import { Speaker, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui-legacy/button';
 
 interface AudioOutputInfo {
   device_name: string;

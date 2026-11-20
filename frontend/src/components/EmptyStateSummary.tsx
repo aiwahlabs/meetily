@@ -2,13 +2,13 @@
 
 import { motion } from 'framer-motion';
 import { FileQuestion, Sparkles } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui-legacy/button';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from '@/components/ui/tooltip';
+} from '@/components/ui-legacy/tooltip';
 
 interface EmptyStateSummaryProps {
   onGenerate: () => void;

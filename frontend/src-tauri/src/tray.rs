@@ -152,7 +152,8 @@ fn resume_recording_handler<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
-fn stop_recording_handler<R: Runtime>(app: &AppHandle<R>) {
+// AIWAH: pub(crate) so the floating button and auto-stop reuse the tray stop path.
+pub(crate) fn stop_recording_handler<R: Runtime>(app: &AppHandle<R>) {
     // Immediately show stopping state
     set_tray_state(app, RecordingState::Stopping);
 
