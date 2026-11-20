@@ -1,19 +1,18 @@
 'use client'
 
-// AIWAH: "Coming up" card on the home screen: today's calendar events.
+// AIWAH: "Coming up" card on the home screen: the next 7 days of calendar events, grouped by day.
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { CalendarDays } from 'lucide-react'
-import { calendar, platformFromUrl, type CalendarEvent, system } from '@/lib/aiwah/api'
-import { PlatformIcon } from '@/components/aiwah/PlatformIcon'
-import { AvatarStack } from '@/components/ui/avatar-stack'
-import { Badge } from '@/components/ui/badge'
+import { calendar, type CalendarEvent } from '@/lib/aiwah/api'
+import { ScheduleList } from '@/components/aiwah/calendar/ScheduleList'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-states'
 import { Skeleton } from '@/components/ui/state'
 
-const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+const HOME_DAYS = 7
+const HOME_MAX_EVENTS = 8
 
 function useNow(ms = 30_000) {
   const [now, setNow] = useState(() => Date.now())
@@ -33,7 +32,7 @@ export function UpcomingCard({ onRecord }: { onRecord: () => void }) {
   useEffect(() => {
     let cancelled = false
     calendar
-      .upcoming(12)
+      .upcoming(HOME_DAYS * 24)
       .then((e) => !cancelled && setEvents(e))
       .catch(() => !cancelled && setFailed(true))
     return () => {
@@ -44,18 +43,27 @@ export function UpcomingCard({ onRecord }: { onRecord: () => void }) {
   const upcoming = (events ?? [])
     .filter((e) => new Date(e.end).getTime() > now)
     .sort((a, b) => +new Date(a.start) - +new Date(b.start))
+  const shown = upcoming.slice(0, HOME_MAX_EVENTS)
+  const hidden = upcoming.length - shown.length
 
   return (
-    <section aria-labelledby="coming-up" className="rounded-xl border border-border bg-card">
-      <h2 id="coming-up" className="px-4 pt-3.5 pb-1 text-title font-semibold text-foreground">
-        Coming up
-      </h2>
+    <section aria-labelledby="coming-up" className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5">
+        <h2 id="coming-up" className="text-title font-semibold text-foreground">
+          Coming up
+        </h2>
+        {!failed && events !== null && upcoming.length > 0 && (
+          <Button size="sm" variant="ghost" onClick={() => router.push('/calendar')}>
+            {hidden > 0 ? `See all ${upcoming.length}` : 'Open calendar'}
+          </Button>
+        )}
+      </div>
       {failed ? (
         <EmptyState
           size="sm"
           illustration={<CalendarDays className="size-8 text-muted-foreground" />}
           title="Calendar isn't connected"
-          description="Sign in with Google to see today's meetings here and get a reminder before they start."
+          description="Sign in with Google to see your meetings here and get a reminder before they start."
           secondaryAction={{ label: 'Open settings', onClick: () => router.push('/settings') }}
         />
       ) : events === null ? (
@@ -67,53 +75,11 @@ export function UpcomingCard({ onRecord }: { onRecord: () => void }) {
         <EmptyState
           size="sm"
           illustration={<CalendarDays className="size-8 text-muted-foreground" />}
-          title="Nothing else today"
-          description="Meetings with a video link will appear here."
+          title="Nothing scheduled this week"
+          description="Meetings on your Google Calendar will appear here."
         />
       ) : (
-        <ul className="divide-y divide-border">
-          {upcoming.map((e) => {
-            const start = new Date(e.start).getTime()
-            const live = start <= now
-            const mins = Math.round((start - now) / 60_000)
-            const soon = !live && mins <= 15
-            const people = e.attendees
-              .filter((a) => !a.isSelf)
-              .map((a) => ({ name: a.name || a.email }))
-            return (
-              <li key={e.id} className="flex items-center gap-3 px-4 py-3">
-                <PlatformIcon platform={platformFromUrl(e.meetingUrl) ?? 'other'} size={32} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-body font-medium text-foreground">{e.title || 'Untitled event'}</p>
-                  <p className="flex items-center gap-2 text-meta text-muted-foreground">
-                    <span className="tabular-nums">
-                      {time(e.start)} – {time(e.end)}
-                    </span>
-                    {live && <Badge tone="success" size="sm" dot>Now</Badge>}
-                    {soon && <Badge tone="primary" size="sm">In {Math.max(mins, 1)} min</Badge>}
-                  </p>
-                </div>
-                {people.length > 0 && <AvatarStack people={people} max={3} size="xs" label="Attendees" />}
-                {e.meetingUrl ? (
-                  <Button
-                    size="sm"
-                    variant={live || soon ? 'primary' : 'outline'}
-                    onClick={() => {
-                      system.openUrl(e.meetingUrl!).catch(() => {})
-                      onRecord()
-                    }}
-                  >
-                    Join &amp; record
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="outline" onClick={onRecord}>
-                    Record
-                  </Button>
-                )}
-              </li>
-            )
-          })}
-        </ul>
+        <ScheduleList events={shown} now={now} onRecord={onRecord} />
       )}
     </section>
   )

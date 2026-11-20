@@ -237,7 +237,7 @@ mod tests {
     use super::*;
 
     fn a(email: &str, is_self: bool) -> EventAttendee {
-        EventAttendee { email: email.to_string(), name: None, is_self }
+        EventAttendee { email: email.to_string(), name: None, is_self, response: None, is_organizer: false, optional: false }
     }
 
     #[test]

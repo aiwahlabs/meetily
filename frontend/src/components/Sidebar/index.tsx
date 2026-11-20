@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Home, MessageSquare, Mic, NotebookPen, Settings, Upload } from 'lucide-react';
+import { CalendarDays, Home, MessageSquare, Mic, NotebookPen, Settings, Upload } from 'lucide-react';
 import { Sidebar, SidebarGroup, SidebarItem } from '@/components/ui/sidebar';
 import { Button, IconButton } from '@/components/ui/button';
 import { ProfileMenu } from '@/components/ui/profile-menu';
@@ -179,6 +179,9 @@ const AppSidebar: React.FC = () => {
         <SidebarGroup>
           <SidebarItem icon={<Home />} render={link('/')} active={onHome}>
             Home
+          </SidebarItem>
+          <SidebarItem icon={<CalendarDays />} render={link('/calendar')} active={pathname === '/calendar'}>
+            Calendar
           </SidebarItem>
           <SidebarItem icon={<NotebookPen />} render={link('/meetings')} active={onMeetings && !(pathname === '/meetings' && folderParam)}>
             Meetings

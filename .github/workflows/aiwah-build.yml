@@ -9,31 +9,43 @@ on:
     branches: [main, 'aiwah/**']
     paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
+    inputs:
+      platform:
+        description: "Which installer to build (Windows is normally built on a local PC)"
+        type: choice
+        options: [macos, windows, both]
+        default: macos
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  # AIWAH: macOS only by default (push and manual runs). Windows installers are built on a
+  # local Windows PC; pick `windows` or `both` when running the workflow by hand to use CI.
+  build-macos:
+    if: ${{ github.event_name == 'push' || inputs.platform != 'windows' }}
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            args: "--target aarch64-apple-darwin"
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            args: ""
     uses: ./.github/workflows/build.yml
     with:
-      platform: ${{ matrix.platform }}
-      target: ${{ matrix.target }}
-      # Updater artifacts stay off until the fork has its own updater signing key.
-      build-args: "${{ matrix.args }} --config src-tauri/tauri.aiwah-noupdater.conf.json"
+      platform: macos-latest
+      target: aarch64-apple-darwin
+      build-args: "--target aarch64-apple-darwin --config src-tauri/tauri.aiwah-noupdater.conf.json"
+      asset-prefix: "aiwah-minutes"
+      upload-artifacts: true
+      sign-binaries: false
+    secrets: inherit
+
+  build-windows:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.platform != 'macos' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      platform: windows-latest
+      target: x86_64-pc-windows-msvc
+      build-args: "--config src-tauri/tauri.aiwah-noupdater.conf.json"
       asset-prefix: "aiwah-minutes"
       upload-artifacts: true
       sign-binaries: false

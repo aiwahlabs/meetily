@@ -48,6 +48,13 @@ pub struct EventAttendee {
     pub email: String,
     pub name: Option<String>,
     pub is_self: bool,
+    /// accepted | declined | tentative | needsAction (Google's responseStatus)
+    #[serde(default)]
+    pub response: Option<String>,
+    #[serde(default)]
+    pub is_organizer: bool,
+    #[serde(default)]
+    pub optional: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -656,6 +663,9 @@ fn parse_event(v: &serde_json::Value) -> Option<CalendarEvent> {
                 email,
                 name: a.get("displayName").and_then(|n| n.as_str()).map(str::to_string),
                 is_self,
+                response: a.get("responseStatus").and_then(|s| s.as_str()).map(str::to_string),
+                is_organizer: a.get("organizer").and_then(|s| s.as_bool()).unwrap_or(false),
+                optional: a.get("optional").and_then(|s| s.as_bool()).unwrap_or(false),
             });
         }
     }
@@ -695,35 +705,48 @@ pub async fn upcoming_events(
     to: DateTime<Utc>,
 ) -> Result<Vec<CalendarEvent>, String> {
     let token = access_token(pool).await?;
-    let resp = http()?
-        .get(EVENTS_URL)
-        .bearer_auth(&token)
-        .query(&[
+    let client = http()?;
+    let mut events: Vec<CalendarEvent> = Vec::new();
+    let mut page_token: Option<String> = None;
+    // Up to 5 pages of 250: a month of a busy calendar fits comfortably.
+    for _ in 0..5 {
+        let mut query = vec![
             ("timeMin", from.to_rfc3339_opts(SecondsFormat::Secs, true)),
             ("timeMax", to.to_rfc3339_opts(SecondsFormat::Secs, true)),
             ("singleEvents", "true".to_string()),
             ("orderBy", "startTime".to_string()),
-            ("maxResults", "50".to_string()),
-        ])
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach Google Calendar: {}", e))?;
-    let status = resp.status();
-    if !status.is_success() {
-        return Err(match status.as_u16() {
-            401 | 403 => "Google Calendar rejected the request. Reconnect Google Calendar in Settings → Calendar.".to_string(),
-            c => format!("Google Calendar returned an error ({})", c),
-        });
+            ("maxResults", "250".to_string()),
+        ];
+        if let Some(t) = &page_token {
+            query.push(("pageToken", t.clone()));
+        }
+        let resp = client
+            .get(EVENTS_URL)
+            .bearer_auth(&token)
+            .query(&query)
+            .send()
+            .await
+            .map_err(|e| format!("Could not reach Google Calendar: {}", e))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(match status.as_u16() {
+                401 | 403 => "Google Calendar rejected the request. Reconnect Google Calendar in Settings → Calendar.".to_string(),
+                c => format!("Google Calendar returned an error ({})", c),
+            });
+        }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Unexpected Google Calendar response: {}", e))?;
+        if let Some(items) = body.get("items").and_then(|i| i.as_array()) {
+            events.extend(items.iter().filter_map(parse_event));
+        }
+        page_token = body.get("nextPageToken").and_then(|t| t.as_str()).map(str::to_string);
+        if page_token.is_none() {
+            break;
+        }
     }
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Unexpected Google Calendar response: {}", e))?;
-    Ok(body
-        .get("items")
-        .and_then(|i| i.as_array())
-        .map(|items| items.iter().filter_map(parse_event).collect())
-        .unwrap_or_default())
+    Ok(events)
 }
 
 // ── Tauri commands ─────────────────────────────────────────────────────────────

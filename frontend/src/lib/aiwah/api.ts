@@ -35,6 +35,10 @@ export interface EventAttendee {
   email: string
   name: string | null
   isSelf: boolean
+  /** Google's answer to the invite. */
+  response?: "accepted" | "declined" | "tentative" | "needsAction" | null
+  isOrganizer?: boolean
+  optional?: boolean
 }
 
 export interface CalendarEvent {
