@@ -29,6 +29,12 @@ pub struct AutoRecSettings {
     pub excluded_keywords: String,
     /// Start the app (hidden, in the tray) when the user signs in. Off unless the user opts in.
     pub start_at_login: bool,
+    /// After a meeting, detect whether it was in English or an Indian language (needs the
+    /// Indian languages pack). Off: the meeting language picker decides.
+    pub detect_language: bool,
+    /// Indian languages this person speaks in meetings (codes like "ml"); detection only
+    /// chooses between English and these.
+    pub indic_languages: Vec<String>,
 }
 
 impl Default for AutoRecSettings {
@@ -44,6 +50,8 @@ impl Default for AutoRecSettings {
             excluded_apps: String::new(),
             excluded_keywords: "personal, private, doctor, medical".to_string(),
             start_at_login: false,
+            detect_language: true,
+            indic_languages: vec!["ml".into(), "ta".into(), "hi".into(), "te".into(), "kn".into()],
         }
     }
 }

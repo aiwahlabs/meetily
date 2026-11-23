@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Building2,
   FlaskConical,
+  Languages,
   Mic,
   Radar,
   Settings2,
@@ -26,6 +27,7 @@ import { SettingsPage, SettingsSection, type SettingsSectionLink } from '@/compo
 import { AccountSection } from '@/components/aiwah/settings/AccountSection';
 import { CallDetectionSection, PrivacySection, useAutoRec } from '@/components/aiwah/settings/CallDetectionSection';
 import { HqSection, useHqForm } from '@/components/aiwah/settings/HqSection';
+import { IndianLanguagesSection } from '@/components/aiwah/settings/IndianLanguagesSection';
 
 const SECTIONS: SettingsSectionLink[] = [
   { id: 'account', title: 'Account', icon: <User /> },
@@ -33,6 +35,7 @@ const SECTIONS: SettingsSectionLink[] = [
   { id: 'privacy', title: 'Privacy', icon: <ShieldCheck /> },
   { id: 'hq', title: 'HQ Workshop', icon: <Building2 /> },
   { id: 'transcription', title: 'Transcription', icon: <DatabaseIcon /> },
+  { id: 'indian-languages', title: 'Indian languages', icon: <Languages /> },
   { id: 'summary', title: 'Summary', icon: <SparkleIcon /> },
   { id: 'recordings', title: 'Recordings', icon: <Mic /> },
   { id: 'general', title: 'General', icon: <Settings2 /> },
@@ -77,6 +80,14 @@ export default function SettingsRoute() {
       el.removeEventListener('scroll', sync);
       window.removeEventListener('resize', sync);
     };
+  }, []);
+
+  // AIWAH: /settings#indian-languages opens at that section.
+  useEffect(() => {
+    const id = window.location.hash.replace('#', '');
+    if (!id) return;
+    const t = setTimeout(() => document.getElementById(id)?.scrollIntoView(), 300);
+    return () => clearTimeout(t);
   }, []);
 
   // Load saved transcript configuration on mount
@@ -130,6 +141,8 @@ export default function SettingsRoute() {
               />
             </div>
           </SettingsSection>
+
+          <IndianLanguagesSection api={autorec} />
 
           <SettingsSection id="summary" title="Summary" description="Which model writes meeting summaries.">
             <div className="p-4">

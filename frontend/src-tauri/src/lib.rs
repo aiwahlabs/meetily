@@ -53,6 +53,7 @@ pub mod hq; // AIWAH: HQ Workshop sync
 pub mod autorec; // AIWAH: call detection, calendar, auto-record
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod indic_engine;
 pub mod state;
 pub mod summary;
 pub mod tray;
@@ -888,6 +889,14 @@ pub fn run() {
             autorec::commands::autorec_detect_now,
             autorec::commands::autorec_refresh_calendar,
             autorec::commands::aiwah_open_url,
+            autorec::commands::aiwah_transcript_speakers,
+            autorec::commands::autorec_record_event,
+            autorec::commands::aiwah_routing_state,
+            autorec::commands::aiwah_meeting_language,
+            autorec::commands::indic_pack_status,
+            autorec::commands::indic_pack_download,
+            autorec::commands::indic_pack_cancel,
+            autorec::commands::indic_pack_delete,
             autorec::calendar::commands::account_status,
             autorec::calendar::commands::account_sign_in,
             autorec::calendar::commands::account_sign_out,

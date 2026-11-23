@@ -2,9 +2,10 @@
 
 import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
-import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
+import { VirtualizedTranscriptView, type SegmentSpeaker } from '@/components/VirtualizedTranscriptView';
+import { transcriptInfo, type TranscriptSpeakers } from '@/lib/aiwah/api';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -64,6 +65,30 @@ export function TranscriptPanel({
     }));
   }, [transcripts, usePagination, segments]);
 
+  // AIWAH: speaker names (mic = the signed-in user, call audio = the guest). Reloaded when the
+  // number of lines changes, e.g. after the Indian-language re-transcription.
+  const [speakers, setSpeakers] = useState<TranscriptSpeakers | null>(null);
+  const lineCount = convertedSegments.length;
+  useEffect(() => {
+    if (!meetingId || isRecording) return;
+    let cancelled = false;
+    transcriptInfo
+      .speakers(meetingId)
+      .then((s) => !cancelled && setSpeakers(s))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [meetingId, isRecording, lineCount]);
+  const speakerOf = useCallback(
+    (id: string): SegmentSpeaker | undefined => {
+      const side = speakers?.sides[id];
+      if (!side || !speakers) return undefined;
+      return { side, name: side === 'me' ? speakers.names.me : speakers.names.them };
+    },
+    [speakers],
+  );
+
   return (
     <div className="flex h-full min-w-0 w-full bg-white flex-col relative @container">
       {/* Title area */}
@@ -94,6 +119,7 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          speakerOf={speakerOf}
         />
       </div>
 

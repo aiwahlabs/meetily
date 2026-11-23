@@ -5,6 +5,8 @@
 //! - `calendar`: Google Calendar sign-in and upcoming events.
 //! - `settings`: auto-record and privacy settings.
 //! - `meta`: per-meeting platform folder, meeting type and calendar event.
+//! - `router`: after a meeting, route its transcript to Parakeet (English) or IndicConformer.
+//! - `speakers`: label transcript lines as this device's user or the other side of the call.
 //! - `watcher`: ties the above together, drives the floating button and auto-record.
 
 pub mod calendar;
@@ -12,8 +14,10 @@ pub mod commands;
 pub mod meta;
 pub mod mic;
 pub mod platform;
+pub mod router;
 pub mod secrets;
 pub mod settings;
+pub mod speakers;
 pub mod watcher;
 
 /// AIWAH: refuse work that must wait for the company Google sign-in (model downloads).

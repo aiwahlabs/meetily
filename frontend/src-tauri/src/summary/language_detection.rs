@@ -149,6 +149,17 @@ fn summary_code_from_whatlang(lang: Lang) -> Option<&'static str> {
         Lang::Nob => Some("no"),
         Lang::Ron => Some("ro"),
         Lang::Ukr => Some("uk"),
+        // AIWAH: Indian languages (IndicConformer transcripts).
+        Lang::Mal => Some("ml"),
+        Lang::Tel => Some("te"),
+        Lang::Kan => Some("kn"),
+        Lang::Ben => Some("bn"),
+        Lang::Mar => Some("mr"),
+        Lang::Guj => Some("gu"),
+        Lang::Pan => Some("pa"),
+        Lang::Urd => Some("ur"),
+        Lang::Ori => Some("or"),
+        Lang::Nep => Some("ne"),
         _ => None,
     }
 }

@@ -184,6 +184,8 @@ async fn run_retranscription<R: Runtime>(
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    // AIWAH: "indic" = IndicConformer for Indian languages (language = its code, e.g. "ml").
+    let use_indic = provider.as_deref() == Some(crate::autorec::router::ENGINE_INDIC);
 
     info!(
         "Starting retranscription for meeting {} with language {:?}, model {:?}, provider {:?}",
@@ -301,7 +303,18 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "transcribing", 25, "Loading transcription engine...");
 
     // Initialize the appropriate engine once (not per-segment)
-    let whisper_engine = if !use_parakeet {
+    let indic_lang = language.clone().unwrap_or_default();
+    let indic_engine = if use_indic {
+        let dir = crate::autorec::router::indic_models_dir(&app)
+            .ok_or_else(|| anyhow!("App data folder is not available"))?;
+        let engine = tokio::task::spawn_blocking(move || crate::indic_engine::IndicEngine::load(&dir))
+            .await
+            .map_err(|e| anyhow!("Indic engine load task panicked: {}", e))??;
+        Some(std::sync::Arc::new(engine))
+    } else {
+        None
+    };
+    let whisper_engine = if !use_parakeet && !use_indic {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
@@ -370,7 +383,16 @@ async fn run_retranscription<R: Runtime>(
         }
 
         // Transcribe this segment
-        let (text, conf) = if use_parakeet {
+        let (text, conf) = if let Some(engine) = indic_engine.as_ref() {
+            let engine = engine.clone();
+            let samples = segment.samples.clone();
+            let lang = indic_lang.clone();
+            let text = tokio::task::spawn_blocking(move || engine.transcribe(&samples, &lang))
+                .await
+                .map_err(|e| anyhow!("IndicConformer task panicked on segment {}: {}", i, e))?
+                .map_err(|e| anyhow!("IndicConformer transcription failed on segment {}: {}", i, e))?;
+            (text, 0.9f32)
+        } else if use_parakeet {
             let engine = parakeet_engine.as_ref().unwrap();
             let text = engine
                 .transcribe_audio(segment.samples.clone())

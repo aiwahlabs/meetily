@@ -149,6 +149,8 @@ pub async fn cleanup_orphans(pool: &SqlitePool) {
     for sql in [
         "DELETE FROM aiwah_meeting_meta WHERE meeting_id NOT IN (SELECT id FROM meetings)",
         "DELETE FROM hq_meeting_sync WHERE meeting_id NOT IN (SELECT id FROM meetings)",
+        "DELETE FROM aiwah_transcript_speaker WHERE meeting_id NOT IN (SELECT id FROM meetings)",
+        "DELETE FROM aiwah_meeting_language WHERE meeting_id NOT IN (SELECT id FROM meetings)",
     ] {
         match sqlx::query(sql).execute(pool).await {
             Ok(r) if r.rows_affected() > 0 => log::info!("Removed {} leftover rows of deleted meetings", r.rows_affected()),

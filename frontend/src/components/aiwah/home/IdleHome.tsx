@@ -7,6 +7,7 @@ import { autorec } from '@/lib/aiwah/api'
 import { firstName, useAccountStatus } from '@/components/aiwah/useAccountStatus'
 import { UpcomingCard } from './UpcomingCard'
 import { RecentMeetingsCard } from './RecentMeetingsCard'
+import { IndicPackCard } from './IndicPackCard'
 
 function greeting(hour: number) {
   if (hour < 5) return 'Good evening'
@@ -52,6 +53,7 @@ export function IdleHome({
           </p>
         </header>
         {banner}
+        <IndicPackCard />
         <UpcomingCard onRecord={onRecord} />
         <RecentMeetingsCard onRecord={onRecord} />
       </div>

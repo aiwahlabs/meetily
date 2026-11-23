@@ -18,6 +18,8 @@ import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useLanguageRouting } from '@/components/aiwah/useLanguageRouting';
+import { Loader } from '@/components/ui/loader';
 
 export default function PageContent({
   meeting,
@@ -157,10 +159,17 @@ export default function PageContent({
     }
   }, [meeting.id, meetingData.aiSummary, summaryGeneration.summaryStatus]);
 
+  // AIWAH: an Indian-language meeting is re-transcribed by IndicConformer right after it is
+  // saved; wait for that (and reload the transcript) before the summary is written.
+  const routing = useLanguageRouting(meeting.id, () => {
+    void onRefetchTranscripts?.();
+  });
+
   // Auto-generate only after the model configuration has settled.
   useEffect(() => {
     if (
       !shouldAutoGenerate
+      || !routing.ready
       || summaryGeneration.summaryStatus !== 'idle'
       || isModelConfigLoading
       || meetingData.transcripts.length === 0
@@ -175,6 +184,7 @@ export default function PageContent({
     void summaryGeneration.handleGenerateSummary('');
   }, [
     shouldAutoGenerate,
+    routing.ready,
     meeting.id,
     meetingData.transcripts.length,
     isModelConfigLoading,
@@ -192,6 +202,19 @@ export default function PageContent({
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen min-w-0 bg-gray-50"
     >
+      {(routing.busy || routing.state?.state === 'failed') && routing.state?.message && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`flex items-center gap-2.5 border-b px-5 py-2 text-sm ${
+            routing.busy ? 'border-border bg-accent text-foreground' : 'border-amber-200 bg-amber-50 text-amber-900'
+          }`}
+        >
+          {routing.busy && <Loader size={14} label="Working" />}
+          <span>{routing.state.message}</span>
+          {routing.busy && <span className="text-muted-foreground">The summary will be written when this finishes.</span>}
+        </div>
+      )}
       <div className="flex flex-1 min-w-0 overflow-hidden">
         <MeetingDetailsSplitView
           activeTab={activeTab}

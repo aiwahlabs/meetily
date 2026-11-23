@@ -5,7 +5,8 @@
 
 import { useMemo, useState } from 'react'
 import { Check, ChevronDown, CircleHelp, Crown, X } from 'lucide-react'
-import { platformFromUrl, system, type CalendarEvent, type EventAttendee } from '@/lib/aiwah/api'
+import { toast } from 'sonner'
+import { autorec, platformFromUrl, system, type CalendarEvent, type EventAttendee } from '@/lib/aiwah/api'
 import { PlatformIcon } from '@/components/aiwah/PlatformIcon'
 import { Avatar } from '@/components/ui/avatar'
 import { AvatarStack } from '@/components/ui/avatar-stack'
@@ -107,6 +108,13 @@ function EventRow({
   const people = e.attendees.filter((a) => !a.isSelf)
   const stack = people.map((a) => ({ name: a.name || a.email }))
   const panelId = `ev-${e.id}`
+  // Record with this event's title, guests and platform; fall back to a plain recording.
+  const recordThis = () => {
+    autorec.recordEvent(e.id).catch((err) => {
+      toast.message("Couldn't attach the calendar event", { description: String(err) })
+      onRecord()
+    })
+  }
 
   return (
     <li className="px-4 py-3">
@@ -154,13 +162,13 @@ function EventRow({
             variant={live || soon ? 'primary' : 'outline'}
             onClick={() => {
               system.openUrl(e.meetingUrl!).catch(() => {})
-              onRecord()
+              recordThis()
             }}
           >
             Join &amp; record
           </Button>
         ) : (
-          <Button size="sm" variant="outline" onClick={onRecord}>
+          <Button size="sm" variant="outline" onClick={recordThis}>
             Record
           </Button>
         )}

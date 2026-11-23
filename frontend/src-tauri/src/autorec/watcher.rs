@@ -764,3 +764,30 @@ async fn tick<R: Runtime>(app: &AppHandle<R>, pool: &SqlitePool, w: &mut Watch) 
         apply_visibility(app, &current);
     }
 }
+
+/// AIWAH: "Join & record" on a calendar event in the app (Home / Calendar). Records with the
+/// event's title, guests and platform, the same as when the 1-minute pop-up is accepted.
+pub async fn record_event<R: Runtime>(app: &AppHandle<R>, pool: &sqlx::SqlitePool, event_id: &str) -> Result<(), String> {
+    let now = Utc::now();
+    let events = calendar::upcoming_events(pool, now - chrono::Duration::hours(6), now + chrono::Duration::days(31)).await?;
+    let event = events
+        .into_iter()
+        .find(|e| e.id == event_id)
+        .ok_or_else(|| "That calendar event was not found. Refresh the calendar and try again.".to_string())?;
+    set_insert(&PROMPTED_EVENTS, &event.id);
+    let platform = event
+        .meeting_url
+        .as_deref()
+        .and_then(platform::platform_from_url)
+        .unwrap_or(CallPlatform::Other);
+    let ctx = RecordingContext {
+        platform,
+        app_name: None,
+        app_id: None,
+        source: "calendar",
+        title: Some(event.title.clone()),
+        event: Some(event),
+        started_at: Utc::now(),
+    };
+    start_recording(app, ctx)
+}

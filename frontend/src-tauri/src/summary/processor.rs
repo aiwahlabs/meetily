@@ -79,6 +79,15 @@ fn should_retry_chunk_failure(
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
     "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
 
+/// AIWAH: how to read Aiwah Minutes transcripts. They come from two on-device engines
+/// (Parakeet for English, IndicConformer for Indian languages), are often code-mixed, and
+/// carry "Name:" speaker labels from the microphone/call-audio split.
+const SOURCE_TRANSCRIPT_NOTES: &str = r#"About the source transcript:
+- It was produced by speech recognition, so expect misheard words, missing punctuation and repeated fragments. Infer the intended meaning from context; never copy obvious recognition errors.
+- It may be in English, in an Indian language (Malayalam, Tamil, Hindi, Telugu, Kannada, Bengali, Marathi and others) written in its native script, romanized, or a mix of English and an Indian language in the same sentence. Understand all of it and summarize the meaning in English; do not transliterate whole sentences.
+- Keep people's names, company and product names, places, numbers, amounts (₹, lakh, crore), dates and times exactly as stated. Write names in their usual English spelling.
+- Lines may start with a speaker label like "Darani S:" (the person recording, on the microphone) or a guest's name (the other side of the call). Use these labels to say who said, decided or committed to what, and to assign owners to action items. If a label is a group such as "Participants (4)", say "the client side" or similar instead of guessing a person."#;
+
 fn resolve_cached_english<'a>(
     cached: Option<&'a str>,
     summary_language: Option<&str>,
@@ -197,6 +206,18 @@ pub(crate) fn language_name_from_code(code: &str) -> Option<&'static str> {
         "no" => Some("Norwegian"),
         "ro" => Some("Romanian"),
         "uk" => Some("Ukrainian"),
+        // AIWAH: Indian languages transcribed on device by IndicConformer.
+        "ml" => Some("Malayalam"),
+        "te" => Some("Telugu"),
+        "kn" => Some("Kannada"),
+        "bn" => Some("Bengali"),
+        "mr" => Some("Marathi"),
+        "gu" => Some("Gujarati"),
+        "pa" => Some("Punjabi"),
+        "ur" => Some("Urdu"),
+        "or" => Some("Odia"),
+        "as" => Some("Assamese"),
+        "ne" => Some("Nepali"),
         _ => None,
     }
 }
@@ -216,7 +237,7 @@ fn translation_system_prompt(target_language: &str) -> String {
 
 fn build_chunk_summary_user_prompt(chunk: &str) -> String {
     format!(
-        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals. Do not include reasoning, self-correction, or meta-commentary — output only the summary content.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
+        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\n{SOURCE_TRANSCRIPT_NOTES}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals. Do not include reasoning, self-correction, or meta-commentary — output only the summary content.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
     )
 }
 
@@ -241,6 +262,9 @@ fn build_final_report_system_prompt(
 6. Output **only** the completed Markdown report.
 7. Do not include reasoning, thinking, self-correction, decision strategy, or any meta-commentary sections — output only the completed Markdown report.
 8. If unsure about something, omit it.
+
+**SOURCE TRANSCRIPT:**
+{SOURCE_TRANSCRIPT_NOTES}
 
 **SECTION-SPECIFIC INSTRUCTIONS:**
 {section_instructions}

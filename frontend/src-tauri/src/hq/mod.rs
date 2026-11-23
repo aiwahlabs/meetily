@@ -350,12 +350,6 @@ impl LocalMeeting {
     }
 }
 
-fn attendees(settings: &HqSettings) -> Vec<serde_json::Value> {
-    match settings.user_email.as_deref().filter(|e| e.contains('@')) {
-        Some(email) => vec![serde_json::json!({ "email": email, "name": settings.user_name })],
-        None => vec![],
-    }
-}
 
 // ── HTTP ───────────────────────────────────────────────────────────────────────
 
@@ -476,39 +470,86 @@ pub async fn list_targets(settings: &HqSettings) -> Result<Vec<HqTarget>, String
     Ok(targets)
 }
 
-/// AIWAH: what the call watcher knows about a meeting.
+/// AIWAH: what the call watcher, the Google sign-in and the speaker split know about a meeting.
 struct CallExtras {
     hq_platform: &'static str,
-    /// Calendar attendees other than the user: (email, name).
+    /// Calendar attendees other than the user who did not decline: (email, name).
     attendees: Vec<(String, Option<String>)>,
+    /// The person recording: the signed-in company Google account (email, name).
+    me: (Option<String>, Option<String>),
+    /// hiring | discovery | demo | client | internal | other
+    meeting_type: Option<String>,
+    /// Transcript lines with speaker names, when the mic/call-audio split labelled them.
+    lines: Option<Vec<crate::autorec::speakers::Line>>,
+    /// Language the transcript is in ("en", "ml", …) and the engine that produced it.
+    language: Option<String>,
+    engine: Option<String>,
 }
 
 impl CallExtras {
-    fn from_meta(meta: Option<&crate::autorec::meta::MeetingMeta>) -> Self {
-        match meta {
-            Some(m) => Self {
-                hq_platform: crate::autorec::platform::CallPlatform::from_str(&m.platform).hq_platform(),
-                attendees: m
-                    .attendees
-                    .iter()
-                    .filter(|a| !a.is_self && a.email.contains('@'))
-                    .map(|a| (a.email.clone(), a.name.clone()))
-                    .collect(),
-            },
-            None => Self { hq_platform: "OTHER", attendees: Vec::new() },
+    async fn load(pool: &SqlitePool, meeting_id: &str) -> Self {
+        let meta = crate::autorec::meta::get_meta(pool, meeting_id).await;
+        let me = crate::autorec::speakers::me_identity(pool).await;
+        let my_email = me.0.clone();
+        let (language, engine) = crate::autorec::router::meeting_language(pool, meeting_id).await;
+        Self {
+            hq_platform: meta
+                .as_ref()
+                .map(|m| crate::autorec::platform::CallPlatform::from_str(&m.platform).hq_platform())
+                .unwrap_or("OTHER"),
+            attendees: meta
+                .as_ref()
+                .map(|m| {
+                    m.attendees
+                        .iter()
+                        .filter(|a| !a.is_self && a.email.contains('@'))
+                        .filter(|a| my_email.as_deref().map(|e| !a.email.eq_ignore_ascii_case(e)).unwrap_or(true))
+                        .filter(|a| a.response.as_deref() != Some("declined"))
+                        .map(|a| (a.email.clone(), a.name.clone()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            me,
+            meeting_type: meta.as_ref().map(|m| m.meeting_type.clone()),
+            lines: crate::autorec::speakers::labelled_lines(pool, meeting_id).await,
+            language,
+            engine,
         }
     }
 
-    /// The user (so HQ shows them the meeting) plus the calendar attendees.
+    /// Everyone on the meeting: the person recording first (their Google account, so HQ links the
+    /// meeting to their CRM user and shows it to them), then the HQ key's own user if it has an
+    /// email, then the calendar guests. Names are omitted rather than sent as null.
     fn people(&self, settings: &HqSettings) -> Vec<serde_json::Value> {
-        let mut people = attendees(settings);
-        let mut seen: std::collections::HashSet<String> = settings.user_email.iter().map(|e| e.to_lowercase()).collect();
-        for (email, name) in &self.attendees {
-            if seen.insert(email.to_lowercase()) {
-                people.push(serde_json::json!({ "email": email, "name": name }));
+        let mut people = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut add = |email: Option<&str>, name: Option<&str>| {
+            let Some(email) = email.map(str::trim).filter(|e| e.contains('@')) else { return };
+            if !seen.insert(email.to_lowercase()) {
+                return;
             }
+            let mut v = serde_json::json!({ "email": email });
+            if let Some(n) = name.map(str::trim).filter(|n| !n.is_empty()) {
+                v["name"] = serde_json::json!(n.chars().take(200).collect::<String>());
+            }
+            people.push(v);
+        };
+        add(self.me.0.as_deref(), self.me.1.as_deref());
+        add(settings.user_email.as_deref(), settings.user_name.as_deref());
+        for (email, name) in &self.attendees {
+            add(Some(email), name.as_deref());
         }
         people
+    }
+
+    /// The company domain, for telling guests from colleagues.
+    fn own_domain(&self, settings: &HqSettings) -> Option<String> {
+        self.me
+            .0
+            .as_deref()
+            .or(settings.user_email.as_deref())
+            .and_then(|e| e.rsplit_once('@'))
+            .map(|(_, d)| d.to_lowercase())
     }
 }
 
@@ -531,7 +572,7 @@ fn contains_token(hay: &str, needle: &str) -> bool {
 /// AIWAH: match a meeting to an HQ lead (attendee email, or "AL<n>" in the title)
 /// or project (project name in the title). Returns (project_id, lead_id).
 async fn auto_link(settings: &HqSettings, title: &str, extras: &CallExtras) -> (Option<String>, Option<String>) {
-    let own_domain = settings.user_email.as_deref().and_then(|e| e.rsplit_once('@')).map(|(_, d)| d.to_lowercase());
+    let own_domain = extras.own_domain(settings);
     let external: Vec<String> = extras
         .attendees
         .iter()
@@ -585,22 +626,46 @@ async fn push_ingest(
     project_id: Option<&str>,
     lead_id: Option<&str>,
     extras: &CallExtras,
+    auto_linked: bool,
 ) -> Result<PushOutcome, String> {
-    let transcript = meeting.transcript_text();
+    // AIWAH: with speaker labels, the transcript reads "Name: text" and every segment carries
+    // its speaker, so HQ shows who said what.
+    let (transcript, segments): (String, Vec<serde_json::Value>) = match &extras.lines {
+        Some(lines) if !lines.is_empty() => {
+            let mut text = crate::autorec::speakers::render_paragraphs(lines);
+            if text.chars().count() > MAX_TRANSCRIPT_CHARS {
+                text = text.chars().take(MAX_TRANSCRIPT_CHARS).collect();
+            }
+            let segs = lines
+                .iter()
+                .map(|l| {
+                    let mut v = serde_json::json!({ "text": l.text });
+                    if let Some(s) = &l.speaker { v["speaker"] = serde_json::json!(s); }
+                    if let Some(start) = l.start { v["startMs"] = serde_json::json!((start * 1000.0).round()); }
+                    if let Some(end) = l.end { v["endMs"] = serde_json::json!((end * 1000.0).round()); }
+                    v
+                })
+                .collect();
+            (text, segs)
+        }
+        _ => (
+            meeting.transcript_text(),
+            meeting
+                .segments
+                .iter()
+                .map(|s| {
+                    let mut v = serde_json::json!({ "text": s.text });
+                    if let Some(start) = s.start { v["startMs"] = serde_json::json!((start * 1000.0).round()); }
+                    if let Some(end) = s.end { v["endMs"] = serde_json::json!((end * 1000.0).round()); }
+                    v
+                })
+                .collect(),
+        ),
+    };
     if transcript.trim().is_empty() {
         return Err("Meeting has no transcript text to sync".to_string());
     }
     let (started_at, ended_at) = meeting.time_range();
-    let segments: Vec<serde_json::Value> = meeting
-        .segments
-        .iter()
-        .map(|s| {
-            let mut v = serde_json::json!({ "text": s.text });
-            if let Some(start) = s.start { v["startMs"] = serde_json::json!((start * 1000.0).round()); }
-            if let Some(end) = s.end { v["endMs"] = serde_json::json!((end * 1000.0).round()); }
-            v
-        })
-        .collect();
 
     let mut body = serde_json::json!({
         "title": meeting.title(),
@@ -609,11 +674,20 @@ async fn push_ingest(
         "segments": segments,
         "startedAt": started_at,
         "endedAt": ended_at,
+        "source": "aiwah-minutes-desktop",
+        "transcriptionEngine": "ON_DEVICE",
     });
     let people = extras.people(settings);
     if !people.is_empty() { body["attendees"] = serde_json::json!(people); }
+    if let Some(t) = &extras.meeting_type { body["meetingType"] = serde_json::json!(t); }
+    if let Some(lang) = extras.language.as_deref().filter(|l| !l.is_empty()) {
+        body["language"] = serde_json::json!(if lang == "en" { "en".to_string() } else { sarvam_language_code(lang) });
+    }
     if let Some(p) = project_id { body["projectId"] = serde_json::json!(p); }
     if let Some(l) = lead_id { body["leadId"] = serde_json::json!(l); }
+    if project_id.is_some() || lead_id.is_some() {
+        body["autoLinked"] = serde_json::json!(auto_linked);
+    }
 
     let resp = client(Duration::from_secs(60))?
         .post(settings.url("/v1/meetings/ingest"))
@@ -653,6 +727,7 @@ async fn push_upload(
     language: &str,
     project_id: Option<&str>,
     extras: &CallExtras,
+    auto_linked: bool,
 ) -> Result<PushOutcome, String> {
     let size = tokio::fs::metadata(recording).await.map_err(|e| format!("Recording not readable: {}", e))?.len();
     if size == 0 {
@@ -672,7 +747,12 @@ async fn push_upload(
         ("endedAt", ended_at),
         ("source", "aiwah-minutes-desktop".to_string()),
     ];
-    if let Some(p) = project_id { query.push(("projectId", p.to_string())); }
+    if let Some(p) = project_id {
+        query.push(("projectId", p.to_string()));
+        query.push(("autoLinked", auto_linked.to_string()));
+    }
+    query.push(("platform", extras.hq_platform.to_string()));
+    if let Some(t) = &extras.meeting_type { query.push(("meetingType", t.clone())); }
     let people = extras.people(settings);
     if !people.is_empty() { query.push(("attendees", serde_json::json!(people).to_string())); }
 
@@ -718,54 +798,62 @@ pub async fn process_meeting<R: Runtime>(app: &AppHandle<R>, pool: &SqlitePool, 
             return Ok("skipped".to_string());
         }
     };
-    // AIWAH: platform + calendar attendees from the call watcher; auto-link to an
-    // HQ lead/project when the user did not pick one.
-    let call_meta = crate::autorec::meta::get_meta(pool, meeting_id).await;
-    let extras = CallExtras::from_meta(call_meta.as_ref());
+    // AIWAH: platform, Google account, calendar guests, speaker labels and transcript language;
+    // auto-link to an HQ lead/project when the user did not pick one.
+    let extras = CallExtras::load(pool, meeting_id).await;
     let (mut project_id, mut lead_id) = (record.project_id.clone(), record.lead_id.clone());
+    let mut auto_linked = false;
     if project_id.is_none() && lead_id.is_none() {
         let (p, l) = auto_link(&settings, &meeting.title(), &extras).await;
         if p.is_some() || l.is_some() {
             log::info!("Auto-linked meeting to an HQ {}", if l.is_some() { "lead" } else { "project" });
+            auto_linked = true;
         }
         project_id = p;
         lead_id = l;
     }
     let project_id = project_id.or_else(|| settings.default_project_id.clone());
-    let language = record.language.clone();
+    let language = extras.language.clone().or_else(|| record.language.clone());
+    // Indian-language meetings already transcribed on this device by IndicConformer go in like
+    // English ones (transcript + speakers + audio). Only when the Indic model is missing does
+    // HQ transcribe the recording itself with Sarvam.
+    let transcribed_on_device_indic = extras.engine.as_deref() == Some(crate::autorec::router::ENGINE_INDIC);
 
-    let outcome = if is_indic_language(language.as_deref()) {
+    let outcome = if is_indic_language(language.as_deref()) && !transcribed_on_device_indic {
         match find_recording(meeting.folder_path.as_deref()) {
             Some(recording) => {
                 let lang = language.as_deref().unwrap_or("ml");
-                match push_upload(&settings, &meeting, &recording, lang, project_id.as_deref(), &extras).await {
+                match push_upload(&settings, &meeting, &recording, lang, project_id.as_deref(), &extras, auto_linked).await {
                     Ok(PushOutcome::UploadUnsupported) => {
                         log::warn!("HQ does not accept recording uploads yet; falling back to transcript ingest");
-                        push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras).await
+                        push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras, auto_linked).await
                     }
                     other => other,
                 }
             }
             None => {
                 log::warn!("Indic meeting has no recording file; syncing local transcript instead");
-                push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras).await
+                push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras, auto_linked).await
             }
         }
     } else {
-        push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras).await
+        push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras, auto_linked).await
     };
 
     match outcome {
         Ok(PushOutcome::Synced { mode, hq_meeting_id }) => {
             mark(pool, meeting_id, "synced", Some(mode), hq_meeting_id.as_deref(), None, true).await?;
             log::info!("Meeting synced to HQ (mode={})", mode);
-            if crate::autorec::settings::load(pool).await.delete_audio_after_sync {
-                if let Some(path) = find_recording(meeting.folder_path.as_deref()) {
-                    match tokio::fs::remove_file(&path).await {
-                        Ok(()) => log::info!("Deleted local audio after HQ sync (privacy setting)"),
-                        Err(e) => log::warn!("Could not delete local audio after sync: {}", e),
-                    }
-                }
+            // The upload route already stored the audio in HQ; after an ingest, attach it now.
+            let audio_done = if mode == "upload" {
+                set_audio_status(pool, meeting_id, "attached").await;
+                true
+            } else {
+                set_audio_status(pool, meeting_id, "pending").await;
+                attach_recording(pool, &settings, meeting_id).await
+            };
+            if audio_done {
+                delete_audio_if_requested(pool, meeting.folder_path.as_deref()).await;
             }
             emit(app, meeting_id, "synced", hq_meeting_id, None);
             Ok("synced".to_string())
@@ -777,6 +865,128 @@ pub async fn process_meeting<R: Runtime>(app: &AppHandle<R>, pool: &SqlitePool, 
             log::warn!("HQ sync attempt failed (status={})", status);
             emit(app, meeting_id, if status == "failed" { "failed" } else { "retrying" }, None, Some(e.clone()));
             Err(e)
+        }
+    }
+}
+
+// ── Recording audio in HQ ──────────────────────────────────────────────────────
+
+/// Give up attaching audio after this many tries (about 2 days at the 5-minute retry loop
+/// while the HQ endpoint is not deployed yet).
+const MAX_AUDIO_ATTEMPTS: i64 = 600;
+
+async fn set_audio_status(pool: &SqlitePool, meeting_id: &str, status: &str) {
+    let _ = sqlx::query("UPDATE hq_meeting_sync SET audio_status = ?, updated_at = ? WHERE meeting_id = ?")
+        .bind(status)
+        .bind(now_str())
+        .bind(meeting_id)
+        .execute(pool)
+        .await;
+}
+
+async fn delete_audio_if_requested(pool: &SqlitePool, folder: Option<&str>) {
+    if !crate::autorec::settings::load(pool).await.delete_audio_after_sync {
+        return;
+    }
+    if let Some(path) = find_recording(folder) {
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => log::info!("Deleted local audio after HQ sync (privacy setting)"),
+            Err(e) => log::warn!("Could not delete local audio after sync: {}", e),
+        }
+    }
+}
+
+enum AttachOutcome {
+    Attached,
+    /// HQ does not have the endpoint yet (404/405): keep the audio queued.
+    Unsupported,
+    NoRecording,
+}
+
+/// `PUT /v1/meetings/:id/recording`: raw audio body; stores the audio on the HQ meeting
+/// without re-transcribing it.
+async fn push_recording(settings: &HqSettings, hq_meeting_id: &str, recording: &Path, duration_secs: Option<f64>) -> Result<AttachOutcome, String> {
+    let size = tokio::fs::metadata(recording).await.map_err(|e| format!("Recording not readable: {}", e))?.len();
+    if size == 0 {
+        return Ok(AttachOutcome::NoRecording);
+    }
+    if size > MAX_UPLOAD_BYTES {
+        return Err("Recording is larger than 500 MB; HQ cannot accept it".to_string());
+    }
+    let bytes = tokio::fs::read(recording).await.map_err(|e| format!("Recording not readable: {}", e))?;
+    let mut query: Vec<(&str, String)> = Vec::new();
+    if let Some(d) = duration_secs.filter(|d| *d > 0.0) {
+        query.push(("durationSeconds", (d.round() as i64).to_string()));
+    }
+    let resp = client(Duration::from_secs(30 * 60))?
+        .put(settings.url(&format!("/v1/meetings/{}/recording", hq_meeting_id)))
+        .bearer_auth(settings.api_key.as_deref().unwrap_or_default().trim())
+        .query(&query)
+        .header(reqwest::header::CONTENT_TYPE, mime_for(recording))
+        .body(bytes)
+        .send()
+        .await
+        .map_err(|e| format!("Could not upload recording to HQ: {}", e))?;
+    match resp.status().as_u16() {
+        // Endpoint not deployed yet (or meeting gone): nothing was stored, retry later.
+        404 | 405 => Ok(AttachOutcome::Unsupported),
+        s if (200..300).contains(&s) => Ok(AttachOutcome::Attached),
+        _ => Err(error_from_response(resp).await),
+    }
+}
+
+/// Attach the local recording to the already-synced HQ meeting. Returns true when the audio is
+/// in HQ (or there is no audio to send), so local cleanup may run.
+async fn attach_recording(pool: &SqlitePool, settings: &HqSettings, meeting_id: &str) -> bool {
+    let Ok(Some(record)) = get_sync_record(pool, meeting_id).await else { return false };
+    let Some(hq_id) = record.hq_meeting_id.clone() else {
+        set_audio_status(pool, meeting_id, "none").await;
+        return false;
+    };
+    let Ok(meeting) = load_meeting(pool, meeting_id).await else { return false };
+    let Some(recording) = find_recording(meeting.folder_path.as_deref()) else {
+        set_audio_status(pool, meeting_id, "none").await;
+        return true;
+    };
+    let _ = sqlx::query("UPDATE hq_meeting_sync SET audio_attempts = COALESCE(audio_attempts, 0) + 1 WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(pool)
+        .await;
+    match push_recording(settings, &hq_id, &recording, Some(meeting.duration_seconds())).await {
+        Ok(AttachOutcome::Attached) => {
+            log::info!("Recording attached to the HQ meeting");
+            set_audio_status(pool, meeting_id, "attached").await;
+            true
+        }
+        Ok(AttachOutcome::NoRecording) => {
+            set_audio_status(pool, meeting_id, "none").await;
+            true
+        }
+        Ok(AttachOutcome::Unsupported) => {
+            log::info!("HQ cannot store meeting audio yet; will retry");
+            false
+        }
+        Err(e) => {
+            log::warn!("Attaching the recording to HQ failed: {}", e);
+            false
+        }
+    }
+}
+
+/// Retry audio for synced meetings whose recording is not in HQ yet.
+async fn process_pending_audio(pool: &SqlitePool, settings: &HqSettings) {
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT s.meeting_id, m.folder_path FROM hq_meeting_sync s JOIN meetings m ON m.id = s.meeting_id
+         WHERE s.status = 'synced' AND s.audio_status = 'pending' AND COALESCE(s.audio_attempts, 0) < ?
+         ORDER BY s.updated_at ASC LIMIT 5",
+    )
+    .bind(MAX_AUDIO_ATTEMPTS)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    for (meeting_id, folder) in rows {
+        if attach_recording(pool, settings, &meeting_id).await {
+            delete_audio_if_requested(pool, folder.as_deref()).await;
         }
     }
 }
@@ -798,6 +1008,7 @@ pub async fn process_pending<R: Runtime>(app: &AppHandle<R>, pool: &SqlitePool) 
             if s == "synced" { synced += 1; }
         }
     }
+    process_pending_audio(pool, &settings).await;
     Ok(synced)
 }
 
@@ -808,12 +1019,23 @@ pub fn on_meeting_saved<R: Runtime>(app: &AppHandle<R>, meeting_id: &str) {
     let app = app.clone();
     let meeting_id = meeting_id.to_string();
     let language = crate::get_language_preference_internal();
+    // AIWAH: the me/them loudness timeline of the recording that just ended, and a "pending"
+    // routing state the meeting page can see before the async work below starts.
+    let timeline = crate::autorec::speakers::take();
+    crate::autorec::router::begin(&app, &meeting_id);
     tauri::async_runtime::spawn(async move {
         let Some(state) = app.try_state::<AppState>() else { return };
         let pool = state.db_manager.pool().clone();
         // AIWAH: remember platform / calendar event / meeting type for folders and HQ.
-        let self_email = load_settings(&pool).await.ok().and_then(|s| s.user_email);
+        let self_email = crate::autorec::speakers::me_identity(&pool)
+            .await
+            .0
+            .or(load_settings(&pool).await.ok().and_then(|s| s.user_email));
         crate::autorec::meta::persist_for_meeting(&pool, &meeting_id, self_email.as_deref()).await;
+        // AIWAH: English stays with the live Parakeet transcript; an Indian language is
+        // re-transcribed by IndicConformer first. Then label who spoke each final line.
+        crate::autorec::router::run(&app, &pool, &meeting_id).await;
+        crate::autorec::speakers::persist_for_meeting(&pool, &meeting_id, &timeline).await;
         let title: Option<String> = sqlx::query_as::<_, (String,)>("SELECT title FROM meetings WHERE id = ?")
             .bind(&meeting_id)
             .fetch_optional(&pool)

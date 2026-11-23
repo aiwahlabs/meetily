@@ -483,6 +483,12 @@ pub async fn api_process_transcript<R: Runtime>(
     );
 
     let pool = state.db_manager.pool().clone();
+    // AIWAH: when the recording knows who spoke (mic = signed-in user, call audio = guest),
+    // summarize "Name: text" lines so decisions and action items get the right owners.
+    let text = match crate::autorec::speakers::labelled_transcript(&pool, &m_id).await {
+        Some(labelled) if !labelled.trim().is_empty() => labelled,
+        _ => text,
+    };
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
 

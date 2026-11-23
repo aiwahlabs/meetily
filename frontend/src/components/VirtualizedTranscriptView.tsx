@@ -10,9 +10,17 @@ import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
 
+/** AIWAH: who spoke a line ("me" = the signed-in user on the microphone). */
+export interface SegmentSpeaker {
+    name: string;
+    side: 'me' | 'them';
+}
+
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
     segments: TranscriptSegmentData[];
+    /** AIWAH: speaker of a line, when known (shown when the speaker changes). */
+    speakerOf?: (segmentId: string) => SegmentSpeaker | undefined;
     /** Whether recording is in progress */
     isRecording?: boolean;
     /** Whether recording is paused */
@@ -71,6 +79,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    speaker,
 }: {
     id: string;
     timestamp: number;
@@ -78,6 +87,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    /** Shown above the line when the speaker changes (AIWAH). */
+    speaker?: SegmentSpeaker;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
@@ -97,6 +108,15 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     </TooltipContent>
                 </Tooltip>
                 <div className="flex-1">
+                    {speaker && (
+                        <p
+                            className={`mb-0.5 text-xs font-semibold ${
+                                speaker.side === 'me' ? 'text-primary' : 'text-slate-600'
+                            }`}
+                        >
+                            {speaker.name}
+                        </p>
+                    )}
                     {isStreaming ? (
                         <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
                             <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
@@ -124,7 +144,16 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     totalCount = 0,
     loadedCount = 0,
     onLoadMore,
+    speakerOf,
 }) => {
+    // AIWAH: speaker label only on the first line of each speaker's turn.
+    const speakerLabel = (index: number): SegmentSpeaker | undefined => {
+        if (!speakerOf) return undefined;
+        const current = speakerOf(segments[index].id);
+        if (!current) return undefined;
+        const previous = index > 0 ? speakerOf(segments[index - 1].id) : undefined;
+        return previous && previous.side === current.side ? undefined : current;
+    };
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
     // Ref for infinite scroll trigger element
@@ -296,6 +325,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        speaker={speakerLabel(virtualRow.index)}
                                     />
                                 </div>
                             );
@@ -335,7 +365,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                 // Simple rendering for small lists (better animations)
                 <>
                     <div className="space-y-1">
-                        {segments.map((segment) => {
+                        {segments.map((segment, index) => {
                             const isStreaming = streamingSegmentId === segment.id;
 
                             return (
@@ -352,6 +382,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        speaker={speakerLabel(index)}
                                     />
                                 </motion.div>
                             );

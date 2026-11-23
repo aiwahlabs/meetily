@@ -1050,6 +1050,9 @@ impl AudioPipeline {
         // Note: target_chunk_duration_ms is ignored - VAD controls segmentation now
         let _ = target_chunk_duration_ms;
 
+        // AIWAH: start a fresh me/them loudness timeline for this recording.
+        crate::autorec::speakers::reset();
+
         Ok(Self {
             receiver,
             transcription_sender,
@@ -1128,6 +1131,8 @@ impl AudioPipeline {
     }
 
     fn emit_mixed_window(&mut self, mic_window: &[f32], sys_window: &[f32], timestamp: f64) {
+        // AIWAH: remember how loud each side was, to label transcript lines me/them later.
+        crate::autorec::speakers::record(timestamp, self.sample_rate, mic_window, sys_window);
         // Simple mixing without aggressive ducking
         let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 

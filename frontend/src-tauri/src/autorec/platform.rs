@@ -58,7 +58,9 @@ impl CallPlatform {
             CallPlatform::GoogleMeet => "GOOGLE_MEET",
             CallPlatform::Zoom => "ZOOM",
             CallPlatform::Teams => "TEAMS",
-            _ => "OTHER",
+            CallPlatform::Slack => "SLACK",
+            CallPlatform::WhatsApp => "WHATSAPP",
+            CallPlatform::Other => "OTHER",
         }
     }
 }
@@ -311,7 +313,9 @@ mod tests {
         }
         assert_eq!(CallPlatform::from_str("nonsense"), CallPlatform::Other);
         assert_eq!(CallPlatform::Teams.hq_platform(), "TEAMS");
-        assert_eq!(CallPlatform::Slack.hq_platform(), "OTHER");
+        assert_eq!(CallPlatform::Slack.hq_platform(), "SLACK");
+        assert_eq!(CallPlatform::WhatsApp.hq_platform(), "WHATSAPP");
+        assert_eq!(CallPlatform::Other.hq_platform(), "OTHER");
     }
 
     #[test]

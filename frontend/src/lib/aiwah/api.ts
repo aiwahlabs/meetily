@@ -81,6 +81,10 @@ export interface AutoRecSettings {
   excludedKeywords: string
   /** Launch quietly in the tray at sign-in, so calls are detected. */
   startAtLogin: boolean
+  /** After a meeting, detect English vs an Indian language (needs the Indian languages pack). */
+  detectLanguage: boolean
+  /** Indian languages this person speaks in meetings, e.g. ["ml", "ta"]. */
+  indicLanguages: string[]
 }
 
 export const autorec = {
@@ -88,7 +92,70 @@ export const autorec = {
   saveSettings: (settings: AutoRecSettings) => invoke<AutoRecSettings>("autorec_save_settings", { settings }),
   detectNow: () => invoke<DetectionReport>("autorec_detect_now"),
   refreshCalendar: () => invoke<void>("autorec_refresh_calendar"),
+  /** Record a calendar event with its title, guests and platform ("Join & record"). */
+  recordEvent: (eventId: string) => invoke<void>("autorec_record_event", { eventId }),
 }
+
+// ── Language routing and speakers ─────────────────────────────────────────────
+
+/** What happens to a meeting's transcript right after it is saved. */
+export interface RoutingState {
+  meetingId: string
+  state: "pending" | "detecting" | "transcribing" | "done" | "failed"
+  language: string | null
+  engine: "parakeet" | "indic" | null
+  message: string | null
+}
+
+export interface TranscriptSpeakers {
+  names: { me: string; them: string }
+  /** transcript line id -> "me" | "them" */
+  sides: Record<string, "me" | "them">
+}
+
+export const transcriptInfo = {
+  routingState: (meetingId: string) => invoke<RoutingState | null>("aiwah_routing_state", { meetingId }),
+  language: (meetingId: string) => invoke<[string | null, string | null]>("aiwah_meeting_language", { meetingId }),
+  speakers: (meetingId: string) => invoke<TranscriptSpeakers>("aiwah_transcript_speakers", { meetingId }),
+}
+
+/** Event emitted while a saved meeting is routed / re-transcribed. */
+export const ROUTING_EVENT = "aiwah-language-routing"
+
+// ── Indian languages pack (IndicConformer) ────────────────────────────────────
+
+export interface IndicPackStatus {
+  installed: boolean
+  bytesOnDisk: number
+  /** Approximate download size in bytes. */
+  downloadBytes: number
+  downloading: boolean
+}
+
+export const INDIC_LANGUAGES: { code: string; name: string }[] = [
+  { code: "ml", name: "Malayalam" },
+  { code: "ta", name: "Tamil" },
+  { code: "hi", name: "Hindi" },
+  { code: "te", name: "Telugu" },
+  { code: "kn", name: "Kannada" },
+  { code: "bn", name: "Bengali" },
+  { code: "mr", name: "Marathi" },
+  { code: "gu", name: "Gujarati" },
+  { code: "pa", name: "Punjabi" },
+  { code: "or", name: "Odia" },
+  { code: "as", name: "Assamese" },
+  { code: "ur", name: "Urdu" },
+]
+
+export const indicPack = {
+  status: () => invoke<IndicPackStatus>("indic_pack_status"),
+  download: () => invoke<void>("indic_pack_download"),
+  cancel: () => invoke<void>("indic_pack_cancel"),
+  remove: () => invoke<IndicPackStatus>("indic_pack_delete"),
+}
+
+/** Progress event while the pack downloads: { downloaded, total } in bytes. */
+export const INDIC_PROGRESS_EVENT = "indic-pack-progress"
 
 export interface DetectionReport {
   micUsers: { appId: string; displayName: string }[]

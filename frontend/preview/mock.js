@@ -1,7 +1,7 @@
 // AIWAH preview: stand-in for the Tauri IPC bridge so the exported UI runs in a normal
 // browser with sample data (no native code, no real Google, no recording). Used by
 // `pnpm preview` (preview/serve.js), which injects this file into every page.
-// Pick a state with ?mock=signedout | onboarding | pop-adhoc | pop-calendar | pop-recording | pop-saved
+// Pick a state with ?mock=routing | indic-installed | signedout | onboarding | pop-adhoc | pop-calendar | pop-recording | pop-saved
 (() => {
   window.alert = (m) => console.warn("[alert suppressed] " + m);
   const now = Date.now();
@@ -42,6 +42,8 @@
     "pop-recording": { window: "floating", floating: { ...popBase, mode: "recording", platform: "google_meet", platformLabel: "Google Meet", appName: "Chrome", title: "Discovery call — Kerala City Hall", startedAt: iso2(-0.4), source: "calendar" } },
     "pop-saved": { window: "floating", floating: { ...popBase, mode: "saved", title: "Discovery call — Kerala City Hall", expiresAt: iso2(0.2), consentReminder: false, meetingId: "m-1" } },
   };
+  PRESETS["routing"] = { routing: { meetingId: "m-1", state: "transcribing", language: "ml", engine: "indic", message: "Transcribing in Malayalam…" } };
+  PRESETS["indic-installed"] = { indicInstalled: true };
   const preset = new URLSearchParams(location.search).get("mock");
   const state = window.__AIWAH_MOCK_STATE__ || PRESETS[preset] || {};
   const handlers = {
@@ -64,7 +66,7 @@
     calendar_get_status: () => ({ connected: true, accountEmail: "darani@aiwahlabs.com", hasClientId: true, clientIdHint: "1234…apps" }),
     calendar_list_events: (a) => events.filter((e) => new Date(e.start).getTime() < Date.now() + ((a && a.hoursAhead) || 24) * 3600000),
     aiwah_account_status: () => state.account ?? { signedIn: true, email: "darani@aiwahlabs.com", name: "Darani", picture: null, domainOk: true },
-    autorec_get_settings: () => ({ floatingButton: false, promptOnMic: true, autoRecordCalendar: false, autoStop: true, consentReminder: true, deleteAudioAfterSync: false, excludedApps: "", excludedKeywords: "personal, private", startAtLogin: true, notifyCalendar: true, showRecordingPill: true, mutedApps: [] }),
+    autorec_get_settings: () => ({ floatingButton: false, promptOnMic: true, autoRecordCalendar: false, autoStop: true, consentReminder: true, deleteAudioAfterSync: false, excludedApps: "", excludedKeywords: "personal, private", startAtLogin: true, notifyCalendar: true, showRecordingPill: true, mutedApps: [], detectLanguage: true, indicLanguages: ["ml", "ta", "hi"] }),
     autorec_get_floating_state: () => state.floating ?? { mode: "idle" },
     autorec_get_prompt_state: () => state.prompt ?? null,
     hq_get_settings: () => ({ baseUrl: "https://hq-api.aiwahconnect.com", hasApiKey: true, apiKeyHint: "xchg_…9f2a", autoSync: true, defaultProjectId: null, userEmail: "darani@aiwahlabs.com", userName: "Darani" }),
@@ -91,10 +93,20 @@
     api_get_meeting_transcripts: () => state.noTranscripts ? ({ transcripts: [], total_count: 0, has_more: false }) : ({ transcripts: [
       { id: "t1", text: "Thanks for joining. Let us walk through how bookings work today.", timestamp: iso(-120), audio_start_time: 0, audio_end_time: 4.2, duration: 4.2 },
       { id: "t2", text: "Most enquiries come on WhatsApp and we track them in a spreadsheet.", timestamp: iso(-119.9), audio_start_time: 4.5, audio_end_time: 9.1, duration: 4.6 },
-      { id: "t3", text: "We would like one place to manage packages, payments and follow-ups.", timestamp: iso(-119.8), audio_start_time: 9.5, audio_end_time: 14.0, duration: 4.5 }
+      { id: "t3", text: "We would like one place to manage packages, payments and follow-ups.", timestamp: iso(-119.8), audio_start_time: 9.5, audio_end_time: 14.0, duration: 4.5 },
+      { id: "t4", text: "Makes sense. Do you also need online payments, or only invoices?", timestamp: iso(-119.7), audio_start_time: 14.5, audio_end_time: 18.0, duration: 3.5 },
+      { id: "t5", text: "Online payments, UPI mainly. Most customers pay an advance of ten thousand rupees.", timestamp: iso(-119.6), audio_start_time: 18.4, audio_end_time: 23.0, duration: 4.6 }
     ], total_count: 3, has_more: false }),
     account_status: () => state.account ?? { signedIn: true, email: "darani@aiwahlabs.com", name: "Darani S", picture: null, domainOk: true, hasClientId: true },
     api_search_transcripts: () => [],
+    aiwah_transcript_speakers: () => ({ names: { me: "Darani S", them: "Anil Kumar" }, sides: { t1: "me", t2: "them", t3: "them", t4: "me", t5: "them" } }),
+    aiwah_routing_state: () => state.routing ?? null,
+    aiwah_meeting_language: () => ["en", "parakeet"],
+    autorec_record_event: () => null,
+    indic_pack_status: () => state.indicInstalled ? { installed: true, bytesOnDisk: 2650000000, downloadBytes: 2650000000, downloading: false } : { installed: false, bytesOnDisk: 0, downloadBytes: 2650000000, downloading: false },
+    indic_pack_download: () => new Promise((r) => setTimeout(r, 1500)),
+    indic_pack_cancel: () => null,
+    indic_pack_delete: () => ({ installed: false, bytesOnDisk: 0, downloadBytes: 2650000000, downloading: false }),
   };
   let cb = 1;
   window.__TAURI_INTERNALS__ = {

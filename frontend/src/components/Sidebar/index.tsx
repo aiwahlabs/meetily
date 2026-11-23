@@ -103,11 +103,9 @@ const AppSidebar: React.FC = () => {
         <SidebarItem icon={<MessageSquare />} render={link('/feedback')} active={pathname === '/feedback'}>
           Send feedback
         </SidebarItem>
-        {!signedIn && (
-          <SidebarItem icon={<Settings />} render={link('/settings')} active={onSettings}>
-            Settings
-          </SidebarItem>
-        )}
+        <SidebarItem icon={<Settings />} render={link('/settings')} active={onSettings}>
+          Settings
+        </SidebarItem>
       </SidebarGroup>
       {signedIn && acct && (
         <ProfileMenu
