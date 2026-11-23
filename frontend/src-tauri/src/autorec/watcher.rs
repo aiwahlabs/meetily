@@ -174,7 +174,12 @@ fn apply_visibility<R: Runtime>(app: &AppHandle<R>, state: &FloatingState) {
     if let Some(w) = app.get_webview_window(FLOATING_LABEL) {
         let ok = if want {
             let _ = w.set_always_on_top(true);
-            w.show().is_ok()
+            // Follow the screen the user is on (the call may be on a second display).
+            place_on_active_monitor(&w);
+            let shown = w.show().is_ok();
+            // set_always_on_top resets the window level, so pin again after it.
+            pin_to_all_spaces(app);
+            shown
         } else {
             w.hide().is_ok()
         };
@@ -206,18 +211,52 @@ pub fn create_floating_window<R: Runtime>(app: &AppHandle<R>) {
         .visible(false)
         .build();
     match built {
-        Ok(_) => resize_floating(app, 376.0, 140.0),
+        Ok(_) => {
+            resize_floating(app, 376.0, 140.0);
+            pin_to_all_spaces(app);
+        }
         Err(e) => log::warn!("Could not create the call pop-up window: {}", e),
     }
 }
 
-/// Size the window to its content (CSS px), pinned to the top-right of the screen.
+/// Size the window to its content (CSS px), pinned to the top-right of the screen the
+/// user is on (the one under the mouse; the primary screen if that is unknown).
 pub fn resize_floating<R: Runtime>(app: &AppHandle<R>, width: f64, height: f64) {
     let Some(w) = app.get_webview_window(FLOATING_LABEL) else { return };
-    let monitor = w.primary_monitor().ok().flatten().or_else(|| w.current_monitor().ok().flatten());
+    let monitor = active_monitor(&w);
     let scale = monitor.as_ref().map(|m| m.scale_factor()).unwrap_or_else(|| w.scale_factor().unwrap_or(1.0));
     let pw = (width.clamp(48.0, 640.0) * scale).round() as i32;
     let ph = (height.clamp(32.0, 480.0) * scale).round() as i32;
+    let _ = w.set_size(PhysicalSize::new(pw as u32, ph as u32));
+    place(&w, monitor.as_ref(), pw);
+}
+
+/// Re-pin the window to the top-right of the screen the user is on, keeping its size.
+fn place_on_active_monitor<R: Runtime>(w: &tauri::WebviewWindow<R>) {
+    let pw = w.outer_size().map(|s| s.width as i32).unwrap_or(0);
+    let monitor = active_monitor(w);
+    place(w, monitor.as_ref(), pw);
+}
+
+/// The monitor under the mouse cursor, else the primary one, else the window's own.
+fn active_monitor<R: Runtime>(w: &tauri::WebviewWindow<R>) -> Option<tauri::Monitor> {
+    if let (Ok(cursor), Ok(monitors)) = (w.cursor_position(), w.available_monitors()) {
+        for m in monitors {
+            let (pos, size) = (m.position(), m.size());
+            let inside = cursor.x >= pos.x as f64
+                && cursor.x < pos.x as f64 + size.width as f64
+                && cursor.y >= pos.y as f64
+                && cursor.y < pos.y as f64 + size.height as f64;
+            if inside {
+                return Some(m);
+            }
+        }
+    }
+    w.primary_monitor().ok().flatten().or_else(|| w.current_monitor().ok().flatten())
+}
+
+fn place<R: Runtime>(w: &tauri::WebviewWindow<R>, monitor: Option<&tauri::Monitor>, pw: i32) {
+    let scale = monitor.map(|m| m.scale_factor()).unwrap_or_else(|| w.scale_factor().unwrap_or(1.0));
     let margin = (12.0 * scale) as i32;
     // macOS menu bar sits at the top; Windows' taskbar is usually at the bottom.
     let top_inset = if cfg!(target_os = "macos") { (34.0 * scale) as i32 } else { margin };
@@ -229,9 +268,36 @@ pub fn resize_floating<R: Runtime>(app: &AppHandle<R>, width: f64, height: f64) 
         }
         None => (margin, top_inset),
     };
-    let _ = w.set_size(PhysicalSize::new(pw as u32, ph as u32));
     let _ = w.set_position(PhysicalPosition::new(x, y));
 }
+
+/// macOS: show the pop-up on every Space and over full-screen apps (a full-screen Meet or
+/// Zoom window is its own Space, and a plain always-on-top window stays behind on the
+/// desktop Space). No-op elsewhere.
+#[cfg(target_os = "macos")]
+fn pin_to_all_spaces<R: Runtime>(app: &AppHandle<R>) {
+    use objc::runtime::Object;
+    use objc::{msg_send, sel, sel_impl};
+
+    // NSWindowCollectionBehavior: CanJoinAllSpaces | Stationary | IgnoresCycle | FullScreenAuxiliary
+    const BEHAVIOR: u64 = (1 << 0) | (1 << 4) | (1 << 6) | (1 << 8);
+    // NSStatusWindowLevel: above full-screen app windows.
+    const LEVEL: i64 = 25;
+
+    let Some(w) = app.get_webview_window(FLOATING_LABEL) else { return };
+    let _ = app.run_on_main_thread(move || {
+        if let Ok(ptr) = w.ns_window() {
+            let ns = ptr as *mut Object;
+            unsafe {
+                let _: () = msg_send![ns, setCollectionBehavior: BEHAVIOR];
+                let _: () = msg_send![ns, setLevel: LEVEL];
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pin_to_all_spaces<R: Runtime>(_app: &AppHandle<R>) {}
 
 // ── Start / stop ──────────────────────────────────────────────────────────────
 
