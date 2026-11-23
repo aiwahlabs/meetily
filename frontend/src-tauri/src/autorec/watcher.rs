@@ -174,7 +174,12 @@ fn apply_visibility<R: Runtime>(app: &AppHandle<R>, state: &FloatingState) {
     if let Some(w) = app.get_webview_window(FLOATING_LABEL) {
         let ok = if want {
             let _ = w.set_always_on_top(true);
-            w.show().is_ok()
+            // Follow the screen the user is on (the call may be on a second display).
+            place_on_active_monitor(&w);
+            let shown = w.show().is_ok();
+            // set_always_on_top resets the window level, so pin again after it.
+            pin_to_all_spaces(app);
+            shown
         } else {
             w.hide().is_ok()
         };
@@ -206,18 +211,52 @@ pub fn create_floating_window<R: Runtime>(app: &AppHandle<R>) {
         .visible(false)
         .build();
     match built {
-        Ok(_) => resize_floating(app, 376.0, 140.0),
+        Ok(_) => {
+            resize_floating(app, 376.0, 140.0);
+            pin_to_all_spaces(app);
+        }
         Err(e) => log::warn!("Could not create the call pop-up window: {}", e),
     }
 }
 
-/// Size the window to its content (CSS px), pinned to the top-right of the screen.
+/// Size the window to its content (CSS px), pinned to the top-right of the screen the
+/// user is on (the one under the mouse; the primary screen if that is unknown).
 pub fn resize_floating<R: Runtime>(app: &AppHandle<R>, width: f64, height: f64) {
     let Some(w) = app.get_webview_window(FLOATING_LABEL) else { return };
-    let monitor = w.primary_monitor().ok().flatten().or_else(|| w.current_monitor().ok().flatten());
+    let monitor = active_monitor(&w);
     let scale = monitor.as_ref().map(|m| m.scale_factor()).unwrap_or_else(|| w.scale_factor().unwrap_or(1.0));
     let pw = (width.clamp(48.0, 640.0) * scale).round() as i32;
     let ph = (height.clamp(32.0, 480.0) * scale).round() as i32;
+    let _ = w.set_size(PhysicalSize::new(pw as u32, ph as u32));
+    place(&w, monitor.as_ref(), pw);
+}
+
+/// Re-pin the window to the top-right of the screen the user is on, keeping its size.
+fn place_on_active_monitor<R: Runtime>(w: &tauri::WebviewWindow<R>) {
+    let pw = w.outer_size().map(|s| s.width as i32).unwrap_or(0);
+    let monitor = active_monitor(w);
+    place(w, monitor.as_ref(), pw);
+}
+
+/// The monitor under the mouse cursor, else the primary one, else the window's own.
+fn active_monitor<R: Runtime>(w: &tauri::WebviewWindow<R>) -> Option<tauri::Monitor> {
+    if let (Ok(cursor), Ok(monitors)) = (w.cursor_position(), w.available_monitors()) {
+        for m in monitors {
+            let (pos, size) = (m.position(), m.size());
+            let inside = cursor.x >= pos.x as f64
+                && cursor.x < pos.x as f64 + size.width as f64
+                && cursor.y >= pos.y as f64
+                && cursor.y < pos.y as f64 + size.height as f64;
+            if inside {
+                return Some(m);
+            }
+        }
+    }
+    w.primary_monitor().ok().flatten().or_else(|| w.current_monitor().ok().flatten())
+}
+
+fn place<R: Runtime>(w: &tauri::WebviewWindow<R>, monitor: Option<&tauri::Monitor>, pw: i32) {
+    let scale = monitor.map(|m| m.scale_factor()).unwrap_or_else(|| w.scale_factor().unwrap_or(1.0));
     let margin = (12.0 * scale) as i32;
     // macOS menu bar sits at the top; Windows' taskbar is usually at the bottom.
     let top_inset = if cfg!(target_os = "macos") { (34.0 * scale) as i32 } else { margin };
@@ -229,9 +268,72 @@ pub fn resize_floating<R: Runtime>(app: &AppHandle<R>, width: f64, height: f64) 
         }
         None => (margin, top_inset),
     };
-    let _ = w.set_size(PhysicalSize::new(pw as u32, ph as u32));
     let _ = w.set_position(PhysicalPosition::new(x, y));
 }
+
+/// macOS: show the pop-up on every Space and over other apps' full-screen windows.
+///
+/// A plain window never appears over another app's full-screen Space, whatever its level or
+/// collection behaviour. A non-activating `NSPanel` does, so the (tao) window is switched to
+/// an `NSPanel` subclass once, the same way the tauri-nspanel plugin does it. The panel never
+/// becomes key or main, so the call app keeps focus. Safe to call repeatedly. No-op elsewhere.
+#[cfg(target_os = "macos")]
+fn pin_to_all_spaces<R: Runtime>(app: &AppHandle<R>) {
+    use objc::declare::ClassDecl;
+    use objc::runtime::{object_getClass, Class, Object, Sel, BOOL, NO, YES};
+    use objc::{class, msg_send, sel, sel_impl};
+
+    extern "C" {
+        fn object_setClass(obj: *mut Object, cls: *const Class) -> *const Class;
+    }
+    extern "C" fn never(_: &Object, _: Sel) -> BOOL {
+        NO
+    }
+
+    // NSWindowCollectionBehavior: CanJoinAllSpaces | Stationary | IgnoresCycle | FullScreenAuxiliary
+    const BEHAVIOR: u64 = (1 << 0) | (1 << 4) | (1 << 6) | (1 << 8);
+    // NSWindowStyleMaskNonactivatingPanel
+    const NONACTIVATING: u64 = 1 << 7;
+    // NSStatusWindowLevel: above full-screen app windows.
+    const LEVEL: i64 = 25;
+    const CLASS_NAME: &str = "AiwahFloatingPanel";
+
+    let Some(w) = app.get_webview_window(FLOATING_LABEL) else { return };
+    let _ = app.run_on_main_thread(move || {
+        let Ok(ptr) = w.ns_window() else { return };
+        let ns = ptr as *mut Object;
+        unsafe {
+            let panel_class: *const Class = match Class::get(CLASS_NAME) {
+                Some(c) => c as *const Class,
+                None => match ClassDecl::new(CLASS_NAME, class!(NSPanel)) {
+                    Some(mut decl) => {
+                        decl.add_method(sel!(canBecomeKeyWindow), never as extern "C" fn(&Object, Sel) -> BOOL);
+                        decl.add_method(sel!(canBecomeMainWindow), never as extern "C" fn(&Object, Sel) -> BOOL);
+                        decl.register() as *const Class
+                    }
+                    None => {
+                        log::warn!("Could not create the call pop-up panel class");
+                        return;
+                    }
+                },
+            };
+            if object_getClass(ns) != panel_class {
+                object_setClass(ns, panel_class);
+            }
+            let mask: u64 = msg_send![ns, styleMask];
+            let _: () = msg_send![ns, setStyleMask: mask | NONACTIVATING];
+            let _: () = msg_send![ns, setFloatingPanel: YES];
+            // NSPanel hides itself when the app is not active, which is always the case here.
+            let _: () = msg_send![ns, setHidesOnDeactivate: NO];
+            let _: () = msg_send![ns, setBecomesKeyOnlyIfNeeded: YES];
+            let _: () = msg_send![ns, setCollectionBehavior: BEHAVIOR];
+            let _: () = msg_send![ns, setLevel: LEVEL];
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pin_to_all_spaces<R: Runtime>(_app: &AppHandle<R>) {}
 
 // ── Start / stop ──────────────────────────────────────────────────────────────
 
