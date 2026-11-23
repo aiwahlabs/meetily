@@ -271,27 +271,63 @@ fn place<R: Runtime>(w: &tauri::WebviewWindow<R>, monitor: Option<&tauri::Monito
     let _ = w.set_position(PhysicalPosition::new(x, y));
 }
 
-/// macOS: show the pop-up on every Space and over full-screen apps (a full-screen Meet or
-/// Zoom window is its own Space, and a plain always-on-top window stays behind on the
-/// desktop Space). No-op elsewhere.
+/// macOS: show the pop-up on every Space and over other apps' full-screen windows.
+///
+/// A plain window never appears over another app's full-screen Space, whatever its level or
+/// collection behaviour. A non-activating `NSPanel` does, so the (tao) window is switched to
+/// an `NSPanel` subclass once, the same way the tauri-nspanel plugin does it. The panel never
+/// becomes key or main, so the call app keeps focus. Safe to call repeatedly. No-op elsewhere.
 #[cfg(target_os = "macos")]
 fn pin_to_all_spaces<R: Runtime>(app: &AppHandle<R>) {
-    use objc::runtime::Object;
-    use objc::{msg_send, sel, sel_impl};
+    use objc::declare::ClassDecl;
+    use objc::runtime::{object_getClass, Class, Object, Sel, BOOL, NO, YES};
+    use objc::{class, msg_send, sel, sel_impl};
+
+    extern "C" {
+        fn object_setClass(obj: *mut Object, cls: *const Class) -> *const Class;
+    }
+    extern "C" fn never(_: &Object, _: Sel) -> BOOL {
+        NO
+    }
 
     // NSWindowCollectionBehavior: CanJoinAllSpaces | Stationary | IgnoresCycle | FullScreenAuxiliary
     const BEHAVIOR: u64 = (1 << 0) | (1 << 4) | (1 << 6) | (1 << 8);
+    // NSWindowStyleMaskNonactivatingPanel
+    const NONACTIVATING: u64 = 1 << 7;
     // NSStatusWindowLevel: above full-screen app windows.
     const LEVEL: i64 = 25;
+    const CLASS_NAME: &str = "AiwahFloatingPanel";
 
     let Some(w) = app.get_webview_window(FLOATING_LABEL) else { return };
     let _ = app.run_on_main_thread(move || {
-        if let Ok(ptr) = w.ns_window() {
-            let ns = ptr as *mut Object;
-            unsafe {
-                let _: () = msg_send![ns, setCollectionBehavior: BEHAVIOR];
-                let _: () = msg_send![ns, setLevel: LEVEL];
+        let Ok(ptr) = w.ns_window() else { return };
+        let ns = ptr as *mut Object;
+        unsafe {
+            let panel_class: *const Class = match Class::get(CLASS_NAME) {
+                Some(c) => c as *const Class,
+                None => match ClassDecl::new(CLASS_NAME, class!(NSPanel)) {
+                    Some(mut decl) => {
+                        decl.add_method(sel!(canBecomeKeyWindow), never as extern "C" fn(&Object, Sel) -> BOOL);
+                        decl.add_method(sel!(canBecomeMainWindow), never as extern "C" fn(&Object, Sel) -> BOOL);
+                        decl.register() as *const Class
+                    }
+                    None => {
+                        log::warn!("Could not create the call pop-up panel class");
+                        return;
+                    }
+                },
+            };
+            if object_getClass(ns) != panel_class {
+                object_setClass(ns, panel_class);
             }
+            let mask: u64 = msg_send![ns, styleMask];
+            let _: () = msg_send![ns, setStyleMask: mask | NONACTIVATING];
+            let _: () = msg_send![ns, setFloatingPanel: YES];
+            // NSPanel hides itself when the app is not active, which is always the case here.
+            let _: () = msg_send![ns, setHidesOnDeactivate: NO];
+            let _: () = msg_send![ns, setBecomesKeyOnlyIfNeeded: YES];
+            let _: () = msg_send![ns, setCollectionBehavior: BEHAVIOR];
+            let _: () = msg_send![ns, setLevel: LEVEL];
         }
     });
 }
