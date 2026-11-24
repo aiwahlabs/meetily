@@ -370,14 +370,36 @@ impl AudioMixerRingBuffer {
 
 /// Simple audio mixer without aggressive ducking
 /// Combines mic + system audio with basic clipping prevention
-struct ProfessionalAudioMixer;
+struct ProfessionalAudioMixer {
+    /// AIWAH: smoothed lift for quiet call audio (1.0 = none).
+    sys_gain: f32,
+}
 
 impl ProfessionalAudioMixer {
     fn new(_sample_rate: u32) -> Self {
-        Self
+        Self { sys_gain: 1.0 }
+    }
+
+    /// AIWAH: the other person's voice often arrives much quieter than the microphone, and the
+    /// transcriber then hears only the louder side. Lift quiet-but-present call audio towards a
+    /// speech-like level (max 6x, smoothed so it does not pump). Silence and the noise floor are
+    /// left alone; loud call audio is not touched. The recording gets the same mix.
+    fn lift_system(&mut self, sys_window: &[f32]) -> Vec<f32> {
+        const TARGET_RMS: f32 = 0.05;
+        const FLOOR_RMS: f32 = 0.0008;
+        const MAX_GAIN: f32 = 6.0;
+        if sys_window.is_empty() {
+            return Vec::new();
+        }
+        let rms = (sys_window.iter().map(|s| s * s).sum::<f32>() / sys_window.len() as f32).sqrt();
+        let target = if rms >= FLOOR_RMS { (TARGET_RMS / rms).clamp(1.0, MAX_GAIN) } else { 1.0 };
+        self.sys_gain += (target - self.sys_gain) * 0.25;
+        sys_window.iter().map(|s| s * self.sys_gain).collect()
     }
 
     fn mix_window(&mut self, mic_window: &[f32], sys_window: &[f32]) -> Vec<f32> {
+        let lifted = self.lift_system(sys_window);
+        let sys_window: &[f32] = &lifted;
         // Handle different lengths (already padded by extract_window, but defensive)
         let max_len = mic_window.len().max(sys_window.len());
         let mut mixed = Vec::with_capacity(max_len);

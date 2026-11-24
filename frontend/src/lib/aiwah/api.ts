@@ -67,6 +67,7 @@ export interface AutoRecSettings {
   notifyCalendar: boolean
   /** Start recording a Google Meet calendar meeting without asking. Off by default. */
   autoRecordCalendar: boolean
+  autoRecordMeet: boolean
   /** Stop when the call app releases the microphone. */
   autoStop: boolean
   /** Small "Recording" pill while recording, when Aiwah Minutes is not in front. */

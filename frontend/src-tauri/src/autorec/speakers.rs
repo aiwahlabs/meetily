@@ -52,6 +52,26 @@ pub fn record(timestamp_secs: f64, sample_rate: u32, mic: &[f32], sys: &[f32]) {
     }
 }
 
+/// One log line about how loud each side was over a recording: how many windows had signal and
+/// the peak levels. Levels only, no content. Tells "call audio was never captured" (system side
+/// silent) apart from "captured but not transcribed".
+pub fn levels_summary(timeline: &[Window]) -> String {
+    let n = timeline.len();
+    if n == 0 {
+        return "no audio windows".to_string();
+    }
+    let pct = |f: &dyn Fn(&Window) -> bool| timeline.iter().filter(|w| f(w)).count() * 100 / n;
+    let peak = |f: &dyn Fn(&Window) -> f32| timeline.iter().map(f).fold(0.0f32, f32::max);
+    format!(
+        "{} windows; microphone active {}% (peak {:.3}); call audio active {}% (peak {:.3})",
+        n,
+        pct(&|w| w.mic >= 0.004),
+        peak(&|w| w.mic),
+        pct(&|w| w.sys >= 0.002),
+        peak(&|w| w.sys),
+    )
+}
+
 /// Hand over the timeline of the recording that just ended.
 pub fn take() -> Vec<Window> {
     TIMELINE.lock().map(|mut t| std::mem::take(&mut *t)).unwrap_or_default()

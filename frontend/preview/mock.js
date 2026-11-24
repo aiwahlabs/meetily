@@ -66,7 +66,7 @@
     calendar_get_status: () => ({ connected: true, accountEmail: "darani@aiwahlabs.com", hasClientId: true, clientIdHint: "1234…apps" }),
     calendar_list_events: (a) => events.filter((e) => new Date(e.start).getTime() < Date.now() + ((a && a.hoursAhead) || 24) * 3600000),
     aiwah_account_status: () => state.account ?? { signedIn: true, email: "darani@aiwahlabs.com", name: "Darani", picture: null, domainOk: true },
-    autorec_get_settings: () => ({ floatingButton: false, promptOnMic: true, autoRecordCalendar: false, autoStop: true, consentReminder: true, deleteAudioAfterSync: false, excludedApps: "", excludedKeywords: "personal, private", startAtLogin: true, notifyCalendar: true, showRecordingPill: true, mutedApps: [], detectLanguage: true, indicLanguages: ["ml", "ta", "hi"] }),
+    autorec_get_settings: () => ({ floatingButton: false, promptOnMic: true, autoRecordCalendar: false, autoRecordMeet: true, autoStop: true, consentReminder: true, deleteAudioAfterSync: false, excludedApps: "", excludedKeywords: "personal, private", startAtLogin: true, notifyCalendar: true, showRecordingPill: true, mutedApps: [], detectLanguage: true, indicLanguages: ["ml", "ta", "hi"] }),
     autorec_get_floating_state: () => state.floating ?? { mode: "idle" },
     autorec_get_prompt_state: () => state.prompt ?? null,
     hq_get_settings: () => ({ baseUrl: "https://hq-api.aiwahconnect.com", hasApiKey: true, apiKeyHint: "xchg_…9f2a", autoSync: true, defaultProjectId: null, userEmail: "darani@aiwahlabs.com", userName: "Darani" }),

@@ -17,6 +17,10 @@ pub struct AutoRecSettings {
     /// is happening and the browser is using the microphone. Off by default: the
     /// user is always asked first unless they opt in.
     pub auto_record_calendar: bool,
+    /// AIWAH: record any Google Meet call on its own while a company Google account is signed
+    /// in (no calendar event needed, no pop-up). On by default; meetings whose calendar title
+    /// matches an excluded keyword and excluded apps are still skipped.
+    pub auto_record_meet: bool,
     /// Stop automatically when the call app releases the microphone (Windows).
     pub auto_stop: bool,
     /// Remind the user to tell participants the call is recorded.
@@ -44,6 +48,7 @@ impl Default for AutoRecSettings {
             notify_calendar: true,
             show_recording_pill: true,
             auto_record_calendar: false,
+            auto_record_meet: true,
             auto_stop: true,
             consent_reminder: true,
             delete_audio_after_sync: false,

@@ -164,6 +164,14 @@ export function CallDetectionSection({ api }: { api: AutoRecApi }) {
         keywords={["calendar", "reminder", "notify"]}
       />
       <SwitchRow
+        id="ar-meet"
+        label="Record every Google Meet call automatically"
+        description="While you are signed in with your company Google account, a Meet call is recorded and sent to HQ without asking. Meetings with a private-sounding title and apps you excluded are skipped."
+        checked={s.autoRecordMeet}
+        onChange={(v) => patch({ autoRecordMeet: v })}
+        keywords={["auto", "meet", "google meet", "record"]}
+      />
+      <SwitchRow
         id="ar-auto"
         label="Record Google Meet calendar meetings automatically"
         description="Starts without asking. The recording pill still shows, and you must tell participants the call is recorded."

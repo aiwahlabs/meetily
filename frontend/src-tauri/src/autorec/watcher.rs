@@ -169,11 +169,20 @@ fn apply_visibility<R: Runtime>(app: &AppHandle<R>, state: &FloatingState) {
         _ => false,
     };
     if want == WINDOW_SHOWN.load(Ordering::SeqCst) {
+        // AIWAH: the OS can drop a window below others (a new full-screen or topmost window,
+        // another desktop/Space). While the pop-up should be up, re-assert it every tick.
+        if want {
+            if let Some(w) = app.get_webview_window(FLOATING_LABEL) {
+                let _ = w.set_always_on_top(true);
+                let _ = w.set_visible_on_all_workspaces(true);
+            }
+        }
         return;
     }
     if let Some(w) = app.get_webview_window(FLOATING_LABEL) {
         let ok = if want {
             let _ = w.set_always_on_top(true);
+            let _ = w.set_visible_on_all_workspaces(true);
             w.show().is_ok()
         } else {
             w.hide().is_ok()
@@ -198,6 +207,8 @@ pub fn create_floating_window<R: Runtime>(app: &AppHandle<R>) {
         .decorations(false)
         .transparent(true)
         .always_on_top(true)
+        // Follow you across desktops / Spaces instead of staying on the one it opened on.
+        .visible_on_all_workspaces(true)
         .skip_taskbar(true)
         .focused(false)
         // Clicks work, but the call app keeps keyboard focus.
@@ -452,6 +463,15 @@ fn event_near<'a>(events: &'a [CalendarEvent], now: DateTime<Utc>, s: &AutoRecSe
         .min_by_key(|e| (e.start - now).num_seconds().abs())
 }
 
+/// True when a calendar event happening now has a title with an excluded word (so a Meet call
+/// during "Doctor appointment" is never recorded on its own).
+fn excluded_event_now(events: &[CalendarEvent], now: DateTime<Utc>, s: &AutoRecSettings) -> bool {
+    let slack = chrono::Duration::minutes(EVENT_MATCH_MIN);
+    events
+        .iter()
+        .any(|e| e.start - slack <= now && now <= e.end + chrono::Duration::minutes(5) && s.is_title_excluded(&e.title))
+}
+
 /// The calendar meeting that should get its "starts in 1 min" prompt now, if any.
 fn calendar_due<'a>(events: &'a [CalendarEvent], now: DateTime<Utc>, s: &AutoRecSettings) -> Option<&'a CalendarEvent> {
     events
@@ -674,6 +694,30 @@ async fn tick<R: Runtime>(app: &AppHandle<R>, pool: &SqlitePool, w: &mut Watch) 
             CallPlatform::Other => event_platform(near_event.as_ref()).unwrap_or(CallPlatform::Other),
             p => p,
         };
+
+        // AIWAH: a Google Meet call while a company Google account is signed in is recorded
+        // without asking (the calendar event is optional; it only supplies title and guests).
+        // Skipped for excluded apps (filtered earlier) and calendar titles with an excluded word.
+        let on_meet = call.platform == CallPlatform::GoogleMeet
+            || (event_platform(near_event.as_ref()) == Some(CallPlatform::GoogleMeet) && is_browser_or_unknown(call));
+        if s.auto_record_meet && on_meet && !excluded_event_now(&w.events, now, &s) && calendar::is_signed_in(pool).await {
+            let key = match near_event.as_ref() {
+                Some(ev) => ev.id.clone(),
+                None => format!("meet:{}", call.window_title.clone().unwrap_or_else(|| call.app_id.clone())),
+            };
+            if !w.auto_started.contains(&key) {
+                w.auto_started.insert(key);
+                let prompt = Prompt { call: Some(call.clone()), event: near_event.clone(), platform: CallPlatform::GoogleMeet };
+                set_prompt(None);
+                if let Some(ev) = near_event.as_ref() {
+                    set_insert(&PROMPTED_EVENTS, &ev.id);
+                }
+                match start_recording(app, ctx_for(&prompt, "calendar")) {
+                    Ok(()) => return,
+                    Err(e) => log::warn!("Auto-record of Google Meet failed to start: {}", e),
+                }
+            }
+        }
 
         // Opt-in: record Google Meet calendar meetings without asking.
         if s.auto_record_calendar {

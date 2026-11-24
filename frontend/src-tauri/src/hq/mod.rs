@@ -1022,6 +1022,7 @@ pub fn on_meeting_saved<R: Runtime>(app: &AppHandle<R>, meeting_id: &str) {
     // AIWAH: the me/them loudness timeline of the recording that just ended, and a "pending"
     // routing state the meeting page can see before the async work below starts.
     let timeline = crate::autorec::speakers::take();
+    log::info!("Recording levels: {}", crate::autorec::speakers::levels_summary(&timeline));
     crate::autorec::router::begin(&app, &meeting_id);
     tauri::async_runtime::spawn(async move {
         let Some(state) = app.try_state::<AppState>() else { return };
