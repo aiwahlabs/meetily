@@ -29,7 +29,7 @@ jobs:
       contents: write
     uses: ./.github/workflows/build.yml
     with:
-      platform: macos-14
+      platform: macos-latest
       target: aarch64-apple-darwin
       build-args: "--target aarch64-apple-darwin --config src-tauri/tauri.aiwah-noupdater.conf.json"
       asset-prefix: "aiwah-minutes"
