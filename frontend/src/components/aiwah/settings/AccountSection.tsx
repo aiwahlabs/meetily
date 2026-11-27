@@ -103,7 +103,7 @@ export function AccountSection() {
           description={
             signInError ??
             (status.hasClientId
-              ? "Sign in with your @aiwahlabs.com Google account to connect your calendar."
+              ? "Sign in with your Google account. It also signs you in to Aiwah HQ and connects your calendar."
               : "Google sign-in is not set up in this build yet. Ask an admin.")
           }
           keywords={["google", "sign in", "log in", "calendar"]}

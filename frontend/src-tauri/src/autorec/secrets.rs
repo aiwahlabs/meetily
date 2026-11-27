@@ -10,6 +10,8 @@ const SERVICE: &str = "com.aiwahlabs.minutes";
 
 /// Names of the stored secrets.
 pub const HQ_API_KEY: &str = "hq-api-key";
+/// HQ session refresh token from the one-login exchange (hq/session.rs).
+pub const HQ_REFRESH_TOKEN: &str = "hq-refresh-token";
 pub const GOOGLE_CLIENT_SECRET: &str = "google-client-secret";
 pub const GOOGLE_REFRESH_TOKEN: &str = "google-refresh-token";
 pub const GOOGLE_ACCESS_TOKEN: &str = "google-access-token";

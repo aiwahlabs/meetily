@@ -56,5 +56,14 @@ the HQ project; for now, the builds are unsigned:
 - **Indic meetings** (Malayalam, Tamil, Hindi and others): the recording is uploaded to HQ.
   HQ transcribes it with Sarvam (company key, server-side) and writes the
   transcript, summary and action items into the meeting.
-- **Credentials:** each user pastes their own HQ API key in Settings → HQ.
-  The key never leaves the device except in requests to HQ.
+- **Credentials (one login):** signing in with Google also signs the user in to HQ.
+  Minutes sends the Google `id_token` to `POST {HQ}/v1/auth/oidc/id-token` and gets an
+  HQ session back: the refresh token lives in the OS keychain (`hq-refresh-token`), the
+  access token in memory, refreshed through `POST /v1/auth/refresh`. Code: `src-tauri/src/hq/session.rs`.
+  HQ decides who may sign in (an invite, or a listed email domain); a 403 signs the user out.
+  If HQ is unreachable or too old for the route (404), sign-in still works and the pasted
+  HQ API key (Settings → HQ → "Use an API key instead") stays as a fallback.
+  The key and the tokens never leave the device except in requests to HQ.
+- **Idempotency:** meeting ingest/upload send `Idempotency-Key: minutes-<local meeting id>`.
+  HQ ignores it until the ingest action declares `durableEffect`, so duplicates after a
+  timeout are not yet prevented server-side.

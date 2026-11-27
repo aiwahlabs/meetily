@@ -12,6 +12,7 @@
 //! Transcript content is never logged.
 
 pub mod commands;
+pub mod session;
 
 use crate::state::AppState;
 use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
@@ -22,6 +23,8 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 pub const DEFAULT_BASE_URL: &str = "https://hq-api.aiwahconnect.com";
+/// Colleagues share this email domain; everyone else on a call is a guest.
+pub const COMPANY_DOMAIN: &str = "aiwahlabs.com";
 const SETTINGS_ID: &str = "default";
 const MAX_TRANSCRIPT_CHARS: usize = 500_000;
 const MAX_UPLOAD_BYTES: u64 = 500 * 1024 * 1024; // HQ limit
@@ -55,6 +58,9 @@ pub struct HqSettings {
     pub default_project_id: Option<String>,
     pub user_email: Option<String>,
     pub user_name: Option<String>,
+    /// An HQ session from the Google sign-in exists (never stored in the database; set on load).
+    #[serde(default)]
+    pub has_session: bool,
 }
 
 impl Default for HqSettings {
@@ -66,13 +72,15 @@ impl Default for HqSettings {
             default_project_id: None,
             user_email: None,
             user_name: None,
+            has_session: false,
         }
     }
 }
 
 impl HqSettings {
     pub fn is_configured(&self) -> bool {
-        self.api_key.as_deref().map(|k| !k.trim().is_empty()).unwrap_or(false)
+        // AIWAH: an HQ session (Google sign-in) or a pasted API key.
+        self.has_session || self.api_key.as_deref().map(|k| !k.trim().is_empty()).unwrap_or(false)
     }
 
     fn url(&self, path: &str) -> String {
@@ -136,8 +144,9 @@ pub async fn load_settings(pool: &SqlitePool) -> Result<HqSettings, String> {
             default_project_id,
             user_email,
             user_name,
+            has_session: session::has_session(),
         },
-        None => HqSettings::default(),
+        None => HqSettings { has_session: session::has_session(), ..HqSettings::default() },
     })
 }
 
@@ -361,6 +370,41 @@ fn client(timeout: Duration) -> Result<reqwest::Client, String> {
         .map_err(|e| format!("HTTP client error: {}", e))
 }
 
+/// Send an HQ request with the best credential: the HQ session from the Google sign-in if there is one
+/// (refreshed when needed; a 401 triggers one refresh and one retry), otherwise the pasted API key.
+/// `build` creates the request for a given Bearer token; it may run twice.
+async fn send_authed<F>(settings: &HqSettings, build: F) -> Result<reqwest::Response, String>
+where
+    F: Fn(&str) -> Result<reqwest::RequestBuilder, String>,
+{
+    let api_key = settings.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty());
+    let build = &build;
+    // `has_session` is false when a caller wants the API key only (e.g. verifying a newly pasted key).
+    let session_token = if settings.has_session { session::bearer(&settings.base_url, false).await? } else { None };
+    let (token, via_session) = match session_token {
+        Some(t) => (t, true),
+        None => (
+            api_key.ok_or("Sign in to HQ with Google, or add an API key, in Settings → HQ")?.to_string(),
+            false,
+        ),
+    };
+    let send = |t: String| async move {
+        build(&t)?.send().await.map_err(|e| format!("Could not reach HQ at {}: {}", settings.base_url, e))
+    };
+    let resp = send(token).await?;
+    if resp.status().as_u16() == 401 && via_session {
+        // Expired between the check and the call, or revoked: refresh once, else fall back to the key.
+        let retry = match session::bearer(&settings.base_url, true).await? {
+            Some(t) => Some(t),
+            None => api_key.map(str::to_string),
+        };
+        if let Some(t) = retry {
+            return send(t).await;
+        }
+    }
+    Ok(resp)
+}
+
 async fn error_from_response(resp: reqwest::Response) -> String {
     let status = resp.status();
     let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
@@ -371,7 +415,7 @@ async fn error_from_response(resp: reqwest::Response) -> String {
         .and_then(|m| m.as_str())
         .unwrap_or("request failed");
     match status.as_u16() {
-        401 => "HQ rejected the API key (401). Update it in Settings → HQ.".to_string(),
+        401 => "HQ rejected the sign-in or API key (401). Sign in again in Settings → HQ.".to_string(),
         403 => format!("HQ refused the request (403): {}", message),
         code => format!("HQ error {}: {}", code, message),
     }
@@ -395,13 +439,7 @@ pub struct HqIdentity {
 }
 
 pub async fn fetch_identity(settings: &HqSettings) -> Result<HqIdentity, String> {
-    let key = settings.api_key.as_deref().ok_or("Add your HQ API key first")?;
-    let resp = client(Duration::from_secs(20))?
-        .get(settings.url("/v1/me"))
-        .bearer_auth(key.trim())
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach HQ at {}: {}", settings.base_url, e))?;
+    let resp = send_authed(settings, |t| Ok(client(Duration::from_secs(20))?.get(settings.url("/v1/me")).bearer_auth(t))).await?;
     if !resp.status().is_success() {
         return Err(error_from_response(resp).await);
     }
@@ -422,13 +460,7 @@ pub struct HqTarget {
 }
 
 async fn get_json(settings: &HqSettings, path: &str) -> Result<serde_json::Value, String> {
-    let key = settings.api_key.as_deref().ok_or("Add your HQ API key first")?;
-    let resp = client(Duration::from_secs(20))?
-        .get(settings.url(path))
-        .bearer_auth(key.trim())
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach HQ at {}: {}", settings.base_url, e))?;
+    let resp = send_authed(settings, |t| Ok(client(Duration::from_secs(20))?.get(settings.url(path)).bearer_auth(t))).await?;
     if !resp.status().is_success() {
         return Err(error_from_response(resp).await);
     }
@@ -543,13 +575,12 @@ impl CallExtras {
     }
 
     /// The company domain, for telling guests from colleagues.
-    fn own_domain(&self, settings: &HqSettings) -> Option<String> {
-        self.me
-            .0
-            .as_deref()
-            .or(settings.user_email.as_deref())
-            .and_then(|e| e.rsplit_once('@'))
-            .map(|(_, d)| d.to_lowercase())
+    ///
+    /// AIWAH: always the company domain, not the signed-in user's own. Anyone HQ lets in can sign
+    /// in with any Google account (a personal Gmail, say), and their address must not make every
+    /// Gmail attendee look like a colleague. This is about meeting guests, not about access.
+    fn own_domain(&self, _settings: &HqSettings) -> Option<String> {
+        Some(COMPANY_DOMAIN.to_string())
     }
 }
 
@@ -622,6 +653,7 @@ enum PushOutcome {
 
 async fn push_ingest(
     settings: &HqSettings,
+    meeting_id: &str,
     meeting: &LocalMeeting,
     project_id: Option<&str>,
     lead_id: Option<&str>,
@@ -689,13 +721,18 @@ async fn push_ingest(
         body["autoLinked"] = serde_json::json!(auto_linked);
     }
 
-    let resp = client(Duration::from_secs(60))?
-        .post(settings.url("/v1/meetings/ingest"))
-        .bearer_auth(settings.api_key.as_deref().unwrap_or_default().trim())
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach HQ: {}", e))?;
+    // AIWAH: the local meeting id is stable per meeting, so it is the idempotency key. HQ honours
+    // `Idempotency-Key` only for actions that declare `durableEffect`; `rest.meetings.ingest` does not
+    // yet, so today a retry after a timeout can still create a duplicate until HQ opts this route in.
+    let idempotency_key = format!("minutes-{}", meeting_id);
+    let resp = send_authed(settings, |t| {
+        Ok(client(Duration::from_secs(60))?
+            .post(settings.url("/v1/meetings/ingest"))
+            .bearer_auth(t)
+            .header("Idempotency-Key", idempotency_key.as_str())
+            .json(&body))
+    })
+    .await?;
     if !resp.status().is_success() {
         return Err(error_from_response(resp).await);
     }
@@ -722,6 +759,7 @@ fn mime_for(path: &Path) -> &'static str {
 
 async fn push_upload(
     settings: &HqSettings,
+    meeting_id: &str,
     meeting: &LocalMeeting,
     recording: &Path,
     language: &str,
@@ -756,15 +794,18 @@ async fn push_upload(
     let people = extras.people(settings);
     if !people.is_empty() { query.push(("attendees", serde_json::json!(people).to_string())); }
 
-    let resp = client(Duration::from_secs(30 * 60))?
-        .post(settings.url("/v1/meetings/upload-recording"))
-        .bearer_auth(settings.api_key.as_deref().unwrap_or_default().trim())
-        .query(&query)
-        .header(reqwest::header::CONTENT_TYPE, mime_for(recording))
-        .body(bytes)
-        .send()
-        .await
-        .map_err(|e| format!("Could not upload recording to HQ: {}", e))?;
+    let bytes = bytes::Bytes::from(bytes);
+    let idempotency_key = format!("minutes-{}", meeting_id);
+    let resp = send_authed(settings, |t| {
+        Ok(client(Duration::from_secs(30 * 60))?
+            .post(settings.url("/v1/meetings/upload-recording"))
+            .bearer_auth(t)
+            .header("Idempotency-Key", idempotency_key.as_str())
+            .query(&query)
+            .header(reqwest::header::CONTENT_TYPE, mime_for(recording))
+            .body(bytes.clone()))
+    })
+    .await?;
     if resp.status().as_u16() == 404 || resp.status().as_u16() == 405 {
         return Ok(PushOutcome::UploadUnsupported);
     }
@@ -823,21 +864,21 @@ pub async fn process_meeting<R: Runtime>(app: &AppHandle<R>, pool: &SqlitePool, 
         match find_recording(meeting.folder_path.as_deref()) {
             Some(recording) => {
                 let lang = language.as_deref().unwrap_or("ml");
-                match push_upload(&settings, &meeting, &recording, lang, project_id.as_deref(), &extras, auto_linked).await {
+                match push_upload(&settings, meeting_id, &meeting, &recording, lang, project_id.as_deref(), &extras, auto_linked).await {
                     Ok(PushOutcome::UploadUnsupported) => {
                         log::warn!("HQ does not accept recording uploads yet; falling back to transcript ingest");
-                        push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras, auto_linked).await
+                        push_ingest(&settings, meeting_id, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras, auto_linked).await
                     }
                     other => other,
                 }
             }
             None => {
                 log::warn!("Indic meeting has no recording file; syncing local transcript instead");
-                push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras, auto_linked).await
+                push_ingest(&settings, meeting_id, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras, auto_linked).await
             }
         }
     } else {
-        push_ingest(&settings, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras, auto_linked).await
+        push_ingest(&settings, meeting_id, &meeting, project_id.as_deref(), lead_id.as_deref(), &extras, auto_linked).await
     };
 
     match outcome {
@@ -918,15 +959,16 @@ async fn push_recording(settings: &HqSettings, hq_meeting_id: &str, recording: &
     if let Some(d) = duration_secs.filter(|d| *d > 0.0) {
         query.push(("durationSeconds", (d.round() as i64).to_string()));
     }
-    let resp = client(Duration::from_secs(30 * 60))?
-        .put(settings.url(&format!("/v1/meetings/{}/recording", hq_meeting_id)))
-        .bearer_auth(settings.api_key.as_deref().unwrap_or_default().trim())
-        .query(&query)
-        .header(reqwest::header::CONTENT_TYPE, mime_for(recording))
-        .body(bytes)
-        .send()
-        .await
-        .map_err(|e| format!("Could not upload recording to HQ: {}", e))?;
+    let bytes = bytes::Bytes::from(bytes);
+    let resp = send_authed(settings, |t| {
+        Ok(client(Duration::from_secs(30 * 60))?
+            .put(settings.url(&format!("/v1/meetings/{}/recording", hq_meeting_id)))
+            .bearer_auth(t)
+            .query(&query)
+            .header(reqwest::header::CONTENT_TYPE, mime_for(recording))
+            .body(bytes.clone()))
+    })
+    .await?;
     match resp.status().as_u16() {
         // Endpoint not deployed yet (or meeting gone): nothing was stored, retry later.
         404 | 405 => Ok(AttachOutcome::Unsupported),

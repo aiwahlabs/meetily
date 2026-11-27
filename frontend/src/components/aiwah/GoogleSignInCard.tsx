@@ -6,7 +6,7 @@ import { AuthCard } from '@/components/ui/auth';
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/alert';
 import { Avatar } from '@/components/ui/avatar';
-import { account, ALLOWED_DOMAIN, type AccountStatus } from '@/lib/aiwah/api';
+import { account, type AccountStatus } from '@/lib/aiwah/api';
 
 export interface GoogleSignInCardProps {
   onSignedIn?: (s: AccountStatus) => void;
@@ -30,9 +30,6 @@ function describeError(err: unknown): string {
   const msg = raw.trim();
   const lower = msg.toLowerCase();
   if (!msg) return 'Sign-in did not finish. Try again.';
-  if (lower.includes(ALLOWED_DOMAIN) || lower.includes('domain') || lower.includes('workspace')) {
-    return `That account isn't an @${ALLOWED_DOMAIN} account. Choose your @${ALLOWED_DOMAIN} Google account and try again.`;
-  }
   if (lower.includes('cancel') || lower.includes('denied') || lower.includes('access_denied')) {
     return 'Sign-in was cancelled. Try again when you are ready.';
   }
@@ -45,7 +42,7 @@ function describeError(err: unknown): string {
 export function GoogleSignInCard({
   onSignedIn,
   title = 'Sign in to Aiwah Minutes',
-  description = `Use your @${ALLOWED_DOMAIN} Google account. We'll also read your calendar so meetings are named and recorded on time.`,
+  description = "Sign in with your Google account. We'll also read your calendar so meetings are named and recorded on time.",
 }: GoogleSignInCardProps) {
   const [status, setStatus] = useState<AccountStatus | null>(null);
   const [checking, setChecking] = useState(true);
@@ -81,7 +78,7 @@ export function GoogleSignInCard({
       if (attempt !== attemptRef.current) return;
       setStatus(s);
       if (s.signedIn && !s.domainOk) {
-        setError(`That account isn't an @${ALLOWED_DOMAIN} account. Choose your @${ALLOWED_DOMAIN} Google account and try again.`);
+        setError('This account cannot be used here. Choose another Google account and try again.');
         return;
       }
       if (s.signedIn && s.domainOk) onSignedInRef.current?.(s);

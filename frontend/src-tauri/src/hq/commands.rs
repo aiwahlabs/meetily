@@ -19,6 +19,10 @@ pub struct HqSettingsView {
     pub default_project_id: Option<String>,
     pub user_email: Option<String>,
     pub user_name: Option<String>,
+    /// Signed in to HQ through Google (one login). The API key is then only a fallback.
+    pub has_session: bool,
+    /// Email of the HQ session, or of the last verified identity.
+    pub signed_in_email: Option<String>,
 }
 
 impl From<&HqSettings> for HqSettingsView {
@@ -28,12 +32,14 @@ impl From<&HqSettings> for HqSettingsView {
         });
         Self {
             base_url: s.base_url.clone(),
-            has_api_key: s.is_configured(),
+            has_api_key: s.api_key.as_deref().map(|k| !k.trim().is_empty()).unwrap_or(false),
             api_key_hint: hint,
             auto_sync: s.auto_sync,
             default_project_id: s.default_project_id.clone(),
             user_email: s.user_email.clone(),
             user_name: s.user_name.clone(),
+            has_session: s.has_session,
+            signed_in_email: if s.has_session { super::session::session_email().or_else(|| s.user_email.clone()) } else { None },
         }
     }
 }
@@ -77,8 +83,10 @@ pub async fn hq_save_settings<R: Runtime>(
     if let Some(key) = settings.api_key {
         let key = key.trim().to_string();
         current.api_key = if key.is_empty() { None } else { Some(key) };
-        current.user_email = None;
-        current.user_name = None;
+        if !current.has_session {
+            current.user_email = None;
+            current.user_name = None;
+        }
     }
     if let Some(auto) = settings.auto_sync {
         current.auto_sync = auto;
@@ -88,10 +96,15 @@ pub async fn hq_save_settings<R: Runtime>(
         current.default_project_id = if project.is_empty() { None } else { Some(project) };
     }
 
-    if key_changed && current.is_configured() {
-        let identity = fetch_identity(&current).await?;
-        current.user_email = identity.email;
-        current.user_name = identity.name;
+    if key_changed && current.api_key.is_some() {
+        // Verify the pasted key itself, not the Google session that may also exist.
+        let mut probe = current.clone();
+        probe.has_session = false;
+        let identity = fetch_identity(&probe).await?;
+        if !current.has_session {
+            current.user_email = identity.email;
+            current.user_name = identity.name;
+        }
     }
     save_settings(&pool, &current).await?;
 
@@ -141,7 +154,7 @@ pub async fn hq_sync_meeting<R: Runtime>(
     let pool = state.db_manager.pool().clone();
     let settings = load_settings(&pool).await?;
     if !settings.is_configured() {
-        return Err("Connect HQ first: add your API key in Settings → HQ".to_string());
+        return Err("Connect HQ first: sign in with Google, or add an API key, in Settings → HQ".to_string());
     }
     enqueue(&pool, &meeting_id, language, project_id, lead_id, force.unwrap_or(false)).await?;
     process_meeting(&app, &pool, &meeting_id).await

@@ -115,6 +115,30 @@ export function HqSection({ form }: { form: HqForm }) {
     )
   }
 
+  const connected = view.hasSession || view.hasApiKey
+
+  const apiKeyRow = (
+    <SettingsRow
+      label="API key"
+      htmlFor="hq-key"
+      description={
+        view.hasSession
+          ? "Only used if your Google sign-in to HQ is not available. HQ Workshop → Settings → API keys."
+          : "HQ Workshop → Settings → API keys. Stored only on this computer."
+      }
+      keywords={["token", "secret"]}
+    >
+      <PasswordInput
+        id="hq-key"
+        autoComplete="off"
+        value={form.apiKey}
+        onChange={(e) => form.setApiKey(e.target.value)}
+        placeholder={view.hasApiKey ? "Paste a new key to replace" : "xchg_…"}
+        className="w-full @min-[560px]:w-72"
+      />
+    </SettingsRow>
+  )
+
   return (
     <SettingsSection
       id="hq"
@@ -124,14 +148,16 @@ export function HqSection({ form }: { form: HqForm }) {
       <SettingsRow
         label="Connection"
         description={
-          view.hasApiKey
-            ? `Connected${view.userEmail ? ` as ${view.userEmail}` : ""} · key ${view.apiKeyHint ?? ""}`
-            : "Not connected. Paste your HQ API key below."
+          view.hasSession
+            ? `Signed in to HQ as ${view.signedInEmail ?? view.userEmail ?? "your Google account"}`
+            : view.hasApiKey
+              ? `Connected${view.userEmail ? ` as ${view.userEmail}` : ""} · key ${view.apiKeyHint ?? ""}`
+              : "Not connected. Sign in with Google in Account settings, or paste an HQ API key below."
         }
         keywords={["status", "hq", "workshop"]}
       >
-        <Badge tone={view.hasApiKey ? "success" : "neutral"} size="sm" dot>
-          {view.hasApiKey ? "Connected" : "Not connected"}
+        <Badge tone={connected ? "success" : "neutral"} size="sm" dot>
+          {connected ? "Connected" : "Not connected"}
         </Badge>
       </SettingsRow>
       <SettingsRow label="HQ URL" htmlFor="hq-url" description="Where your HQ runs." keywords={["server", "address", "base url"]}>
@@ -144,21 +170,14 @@ export function HqSection({ form }: { form: HqForm }) {
           spellCheck={false}
         />
       </SettingsRow>
-      <SettingsRow
-        label="API key"
-        htmlFor="hq-key"
-        description="HQ Workshop → Settings → API keys. Stored only on this computer."
-        keywords={["token", "secret"]}
-      >
-        <PasswordInput
-          id="hq-key"
-          autoComplete="off"
-          value={form.apiKey}
-          onChange={(e) => form.setApiKey(e.target.value)}
-          placeholder={view.hasApiKey ? "Paste a new key to replace" : "xchg_…"}
-          className="w-full @min-[560px]:w-72"
-        />
-      </SettingsRow>
+      {view.hasSession ? (
+        <details className="px-4 py-2" data-testid="hq-api-key-disclosure">
+          <summary className="cursor-pointer text-sm text-muted-foreground">Use an API key instead</summary>
+          {apiKeyRow}
+        </details>
+      ) : (
+        apiKeyRow
+      )}
       <SettingsRow
         label="Default project ID"
         htmlFor="hq-project"
@@ -183,7 +202,7 @@ export function HqSection({ form }: { form: HqForm }) {
         <Switch id="hq-autosync" checked={view.autoSync} onCheckedChange={form.setAutoSync} />
       </SettingsRow>
       <SettingsRow label="Sync now" description="Send meetings that are still waiting." keywords={["upload", "send", "pending"]}>
-        <Button size="sm" variant="outline" onClick={syncNow} loading={syncing} disabled={!view.hasApiKey}>
+        <Button size="sm" variant="outline" onClick={syncNow} loading={syncing} disabled={!connected}>
           {!syncing && <CloudUpload aria-hidden />}
           Sync now
         </Button>
