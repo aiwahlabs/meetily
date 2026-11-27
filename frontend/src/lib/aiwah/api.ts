@@ -5,9 +5,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 
-// ── Account (Google sign-in, restricted to the company domain) ────────────────
-
-export const ALLOWED_DOMAIN = "aiwahlabs.com"
+// ── Account (Google sign-in; HQ decides who gets in) ──────────────────────────
 
 export interface AccountStatus {
   signedIn: boolean
@@ -15,7 +13,7 @@ export interface AccountStatus {
   name: string | null
   /** Google profile photo URL, if any. */
   picture: string | null
-  /** The signed-in email belongs to ALLOWED_DOMAIN. */
+  /** Kept for older callers: true whenever an account is signed in. HQ, not an email domain, decides who may use the app. */
   domainOk: boolean
   /** A Google OAuth client is built in (or configured). False = sign-in cannot work yet. */
   hasClientId: boolean
@@ -24,7 +22,7 @@ export interface AccountStatus {
 export const account = {
   status: () => invoke<AccountStatus>("account_status"),
   /** Opens the browser for Google sign-in and waits (up to 5 min). Rejects with a
-   *  user-facing message, e.g. "Use your @aiwahlabs.com Google account". */
+   *  user-facing message, e.g. "You don't have access to Aiwah HQ yet. Ask an Aiwah admin to invite you." */
   signIn: () => invoke<AccountStatus>("account_sign_in"),
   signOut: () => invoke<AccountStatus>("account_sign_out"),
 }
@@ -272,6 +270,9 @@ export interface HqSettingsView {
   defaultProjectId: string | null
   userEmail: string | null
   userName: string | null
+  /** Signed in to HQ through the Google sign-in (one login). The API key is then only a fallback. */
+  hasSession: boolean
+  signedInEmail: string | null
 }
 
 export const hq = {

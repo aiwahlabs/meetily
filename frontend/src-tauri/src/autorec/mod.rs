@@ -29,6 +29,6 @@ pub async fn require_signed_in<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> 
     if calendar::is_signed_in(state.db_manager.pool()).await {
         Ok(())
     } else {
-        Err(format!("Sign in with your @{} Google account first.", calendar::ALLOWED_DOMAIN))
+        Err("Sign in with your Google account first.".to_string())
     }
 }

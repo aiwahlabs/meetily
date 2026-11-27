@@ -18,12 +18,8 @@ const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 const EVENTS_URL: &str = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const SCOPES: &str = "https://www.googleapis.com/auth/calendar.events.readonly openid email profile";
-/// AIWAH: only company Google accounts may sign in.
-pub const ALLOWED_DOMAIN: &str = "aiwahlabs.com";
-
-pub fn email_domain_ok(email: &str) -> bool {
-    email.rsplit_once('@').map(|(_, d)| d.trim().eq_ignore_ascii_case(ALLOWED_DOMAIN)).unwrap_or(false)
-}
+// AIWAH: who may use the app is decided by HQ (invite or listed domain), not by an email domain
+// hard-coded here: see `connect` and `hq::session`.
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const MAX_DESCRIPTION_CHARS: usize = 2000;
 const MEETING_HOSTS: &[&str] = &["zoom.us", "teams.microsoft.com", "teams.live.com", "meet.google.com"];
@@ -519,8 +515,6 @@ async fn connect(pool: &SqlitePool) -> Result<CalendarStatus, String> {
             ("state", state.as_str()),
             ("access_type", "offline"),
             ("prompt", "consent"),
-            // Ask Google to offer only company accounts (enforced again below).
-            ("hd", ALLOWED_DOMAIN),
         ],
     )
     .map_err(|e| format!("Failed to build sign-in URL: {}", e))?;
@@ -547,22 +541,46 @@ async fn connect(pool: &SqlitePool) -> Result<CalendarStatus, String> {
         Err(TokenError::InvalidGrant) => return Err("Google rejected the sign-in code. Please try again.".to_string()),
         Err(TokenError::Other(e)) => return Err(e),
     };
-    // AIWAH: company accounts only. The id_token comes straight from Google's token
-    // endpoint over TLS, so its claims can be trusted without a signature check.
+    // AIWAH: one login. The id_token comes straight from Google's token endpoint over TLS, so its
+    // claims can be trusted here; HQ verifies the signature itself when we hand it over below.
     let claims = t.id_token.as_deref().and_then(id_token_claims).unwrap_or(serde_json::Value::Null);
     let email = claims.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let verified = claims.get("email_verified").and_then(|v| v.as_bool()).unwrap_or(false);
-    if !email_domain_ok(&email) || !verified {
-        if let Some(tok) = t.refresh_token.as_deref().or(t.access_token.as_deref()) {
-            if let Ok(c) = http() {
-                let _ = c.post(REVOKE_URL).form(&[("token", tok)]).send().await;
+    let revoke_google = |t: &TokenResponse| {
+        let tok = t.refresh_token.clone().or_else(|| t.access_token.clone());
+        async move {
+            if let (Some(tok), Ok(c)) = (tok, http()) {
+                let _ = c.post(REVOKE_URL).form(&[("token", tok.as_str())]).send().await;
             }
         }
-        return Err(if email.is_empty() {
-            format!("Use your @{} Google account.", ALLOWED_DOMAIN)
-        } else {
-            format!("Use your @{} Google account. You signed in as {}.", ALLOWED_DOMAIN, email)
-        });
+    };
+    if email.is_empty() || !verified {
+        revoke_google(&t).await;
+        return Err("Google did not return a verified email address for this account. Try another account.".to_string());
+    }
+    // HQ decides who gets in. 403 = not invited: sign out of everything. Unreachable / old server
+    // (404) / not yet configured to trust this app (401): carry on as before, minus any domain gate;
+    // the pasted API key still works as a fallback.
+    let hq = crate::hq::load_settings(pool).await?;
+    if let Some(id_token) = t.id_token.as_deref() {
+        match crate::hq::session::exchange_id_token(&hq.base_url, id_token).await {
+            crate::hq::session::Exchange::SignedIn { email: hq_email, name: hq_name } => {
+                let mut hq = hq;
+                hq.user_email = hq_email.or_else(|| Some(email.clone()));
+                if hq.user_name.is_none() {
+                    hq.user_name = hq_name;
+                }
+                let _ = crate::hq::save_settings(pool, &hq).await;
+            }
+            crate::hq::session::Exchange::NotAllowed => {
+                revoke_google(&t).await;
+                crate::hq::session::sign_out(&hq.base_url).await;
+                return Err(crate::hq::session::NOT_ALLOWED_MESSAGE.to_string());
+            }
+            crate::hq::session::Exchange::Unavailable(why) => {
+                log::warn!("HQ sign-in exchange unavailable ({}); continuing without an HQ session", why);
+            }
+        }
     }
     let name = claims.get("name").and_then(|v| v.as_str()).map(str::to_string);
     let picture = claims.get("picture").and_then(|v| v.as_str()).map(str::to_string);
@@ -773,7 +791,8 @@ pub async fn account_status(pool: &SqlitePool) -> Result<AccountStatus, String> 
             .unwrap_or(None);
     let (name, picture) = details.unwrap_or((None, None));
     let email = st.account_email.clone();
-    let domain_ok = email.as_deref().map(email_domain_ok).unwrap_or(false);
+    // AIWAH: no email-domain gate any more (HQ decides at sign-in); kept so the UI contract is unchanged.
+    let domain_ok = email.is_some();
     Ok(AccountStatus {
         signed_in: st.connected && email.is_some(),
         email,
@@ -810,6 +829,10 @@ pub mod commands {
     pub async fn account_sign_out(state: tauri::State<'_, AppState>) -> Result<AccountStatus, String> {
         let pool = state.db_manager.pool();
         disconnect(pool).await?;
+        // AIWAH: one login: signing out of Google signs out of HQ too (the API-key fallback is kept).
+        if let Ok(hq) = crate::hq::load_settings(pool).await {
+            crate::hq::session::sign_out(&hq.base_url).await;
+        }
         let _ = sqlx::query("DELETE FROM aiwah_account WHERE id = 'default'").execute(pool).await;
         crate::autorec::watcher::invalidate_calendar();
         super::account_status(pool).await
